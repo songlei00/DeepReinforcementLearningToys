@@ -3,13 +3,16 @@ from collections import namedtuple, deque
 from torch import nn, optim
 import random
 
+config = {
+    'name': None
+}
+
 class ReplayBuffer():
 
     def __init__(self, buf_sz, batch_sz=1, seed=None):
         self.memory = deque(maxlen=buf_sz)
         self.batch_sz = batch_sz
         self.experience = namedtuple("Experience", field_names=['state', 'action', 'reward', 'next_state', 'done'])
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         random.seed(seed)
 
     def add_experience(self, s, a, r, s_, done):
@@ -23,8 +26,8 @@ class ReplayBuffer():
 class BaseAgent():
 
     def __init__(self, config):
-        pass
-
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
 class DQN(BaseAgent):
 
     def __init__(self, config):
