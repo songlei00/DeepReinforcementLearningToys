@@ -86,6 +86,10 @@ class DQN():
             self.env.render()
             a = self.select_action(s)
             s_, r, done, _ = self.env.step(a)
+            x, x_dot, theta, theta_dot = s_
+            r1 = (self.env.x_threshold - abs(x)) / self.env.x_threshold - 0.8
+            r2 = (self.env.theta_threshold_radians - abs(theta)) / self.env.theta_threshold_radians - 0.5
+            r = r1 + r2
             tot_r += r
             self.replay_buffer.add_experience(s, a, r, s_)
             s = s_
