@@ -30,8 +30,8 @@ class QNetwork(nn.Module):
 
     def __init__(self, input_sz=4, output_sz=2):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(input_sz, 120)
-        self.fc2 = nn.Linear(120, 84)
+        self.fc1 = nn.Linear(input_sz, 256)
+        self.fc2 = nn.Linear(256, 84)
         self.fc3 = nn.Linear(84, output_sz)
 
     def forward(self, x):
@@ -48,7 +48,7 @@ class DQN():
         n_action,
         gamma=0.99,
         epsilon=0.1,
-        target_update=100,
+        target_update=10,
         max_step=10000
     ):
         self.env = env
@@ -78,6 +78,9 @@ class DQN():
                 a = self.q_net(state).max(1)[1].numpy()[0]
         return a
 
+    def train(self, spisodes):
+        for episode in range(spisodes):
+            dqn.step(episode)
 
     def step(self, episode):
         s = self.env.reset()
@@ -86,10 +89,10 @@ class DQN():
             self.env.render()
             a = self.select_action(s)
             s_, r, done, _ = self.env.step(a)
-            x, x_dot, theta, theta_dot = s_
-            r1 = (self.env.x_threshold - abs(x)) / self.env.x_threshold - 0.8
-            r2 = (self.env.theta_threshold_radians - abs(theta)) / self.env.theta_threshold_radians - 0.5
-            r = r1 + r2
+            # x, x_dot, theta, theta_dot = s_
+            # r1 = (self.env.x_threshold - abs(x)) / self.env.x_threshold - 0.8
+            # r2 = (self.env.theta_threshold_radians - abs(theta)) / self.env.theta_threshold_radians - 0.5
+            # r = r1 + r2
             tot_r += r
             self.replay_buffer.add_experience(s, a, r, s_)
             s = s_
@@ -113,8 +116,6 @@ class DQN():
         loss = self.loss_fn(q_val, epected_q)
         self.opt.zero_grad()
         loss.backward()
-        for param in self.q_net.parameters():
-            param.grad.data.clamp_(-1, 1)
         self.opt.step()
 
     def plot_reward(self):
@@ -123,27 +124,10 @@ class DQN():
 
 
 env = gym.make('CartPole-v0')
-dqn = DQN(env, 2)
+dqn = DQN(env=env, n_action=2)
 
-for episode in range(10000):
-    dqn.step(episode)
+dqn.train(1000)
 
 env.close()
 
 dqn.plot_reward()
-
-
-# env = gym.make('CartPole-v0')
-
-# for episode in range(10):
-#     env.reset()
-#     while True:
-#         env.render()
-#         a = np.random.randint(0, 2)
-#         # a = int(input())
-#         obs, r, done, _ = env.step(a)
-#         print(obs, r, done)
-#         if done:
-#             break
-
-# env.close()
