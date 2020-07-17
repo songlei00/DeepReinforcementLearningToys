@@ -106,6 +106,7 @@ class DQN():
         self.reward_list.append(tot_r)
 
     def learn(self):
+        self.opt.zero_grad()
         ret = self.replay_buffer.random_select()
         s, a, r, s_ = ret[0]
         s = torch.tensor(s, dtype=torch.float32).unsqueeze(0)
@@ -114,7 +115,6 @@ class DQN():
         q_target_val = self.q_target(s_)
         epected_q = q_target_val * self.gamma + r
         loss = self.loss_fn(q_val, epected_q)
-        self.opt.zero_grad()
         loss.backward()
         self.opt.step()
 
