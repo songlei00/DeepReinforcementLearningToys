@@ -2,19 +2,34 @@ import sys
 sys.path.append('..')
 
 from tools.replay_buffer import ReplayBuffer
-from tools.network import SimpleNet
 import gym
 import torch
 from torch import nn, optim
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import matplotlib.pyplot as plt
+
+class SimpleNet(nn.Module):
+
+    def __init__(self, input_sz, output_sz):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(input_sz, 256)
+        self.fc2 = nn.Linear(256, 84)
+        self.fc3 = nn.Linear(84, output_sz)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
  
 class DQN():
 
     def __init__(
         self,
         env,
+        n_state,
         n_action,
         gamma=0.9,
         buf_sz=2000,
@@ -24,6 +39,7 @@ class DQN():
         target_update=100,
     ):
         self.env = env
+        self.n_state = n_state
         self.n_action = n_action
         self.gamma = gamma
         self.buf_sz = buf_sz
@@ -31,16 +47,16 @@ class DQN():
         self.learn_rate = learn_rate
         self.epsilon = epsilon
         self.target_update = target_update
-        self.step_cnt = 0
 
         self.replay_buffer = ReplayBuffer(buf_sz, batch_sz=batch_sz)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.q_net = SimpleNet().to(self.device)     # q eval
-        self.q_target = SimpleNet().to(self.device)  # fixed q
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.q_net = SimpleNet(self.n_state, self.n_action).to(self.device)     # q eval
+        self.q_target = SimpleNet(self.n_state, self.n_action).to(self.device)  # fixed q
         self.q_target.load_state_dict(self.q_net.state_dict())
         self.opt = torch.optim.Adam(self.q_net.parameters(), lr=learn_rate)
         self.loss_fn = nn.MSELoss()
 
+        self.step_cnt = 0
         self.reward_list = []
 
     def select_action(self, state):
@@ -62,6 +78,7 @@ class DQN():
                 s_, r, done, _ = self.env.step(a)
                 tot_r += r
 
+                # state为(车的位置，车的速度，杆的角度，杆的速度)
                 x, x_dot, theta, theta_dot = s_
                 r1 = (env.x_threshold - abs(x)) / env.x_threshold - 0.8
                 r2 = (env.theta_threshold_radians - abs(theta)) / env.theta_threshold_radians - 0.5
@@ -76,7 +93,7 @@ class DQN():
 
                 if done:
                     break
-
+                
             self.reward_list.append(tot_r)
 
     def learn(self):
@@ -103,14 +120,19 @@ class DQN():
 
     def plot_reward(self):
         plt.plot(self.reward_list)
-        plt.title('DQN: CartPole-v0')
+        plt.title('DQN: CartPole-v1')
         plt.xlabel('epoch')
         plt.ylabel('reward')
+        plt.savefig('DQN_CartPole.png')
         plt.show()
 
 
-env = gym.make('CartPole-v0')
-dqn = DQN(env=env, n_action=2)
+env = gym.make('CartPole-v1')
+dqn = DQN(
+    env=env,
+    n_state=env.observation_space.shape[0],
+    n_action=env.action_space.n
+)
 
 dqn.train(300)
 
