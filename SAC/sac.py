@@ -27,11 +27,11 @@ class ReplayBuffer():
     def __len__(self):
         return len(self.memory)
 
+
 class QNetwork(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim=256):
         super(QNetwork, self).__init__()
-
-        # cliped double Q
+        
         self.linear1 = nn.Linear(num_inputs + num_actions, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, 1)
@@ -41,6 +41,7 @@ class QNetwork(nn.Module):
         self.linear6 = nn.Linear(hidden_dim, 1)
 
     def forward(self, state, action):
+        # cliped double Q
         xu = torch.cat([state, action], 1)
         
         x1 = F.relu(self.linear1(xu))
@@ -55,7 +56,7 @@ class QNetwork(nn.Module):
 
 
 class GaussianPolicy(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_dim=256, action_space=None, log_std_min=-20, log_std_max=-2):
+    def __init__(self, num_inputs, num_actions, hidden_dim=256, log_std_min=-20, log_std_max=-2):
         super(GaussianPolicy, self).__init__()
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
@@ -65,19 +66,7 @@ class GaussianPolicy(nn.Module):
 
         self.mean_linear = nn.Linear(hidden_dim, num_actions)
         self.log_std_linear = nn.Linear(hidden_dim, num_actions)
-
-        # action rescaling
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        if action_space is None:
-            self.action_scale = torch.tensor(1.)
-            self.action_bias = torch.tensor(0.)
-        else:
-            self.action_scale = torch.FloatTensor(
-                (action_space.high - action_space.low) / 2.)
-            self.action_bias = torch.FloatTensor(
-                (action_space.high + action_space.low) / 2.)
-        self.action_scale = self.action_scale.to(self.device)
-        self.action_bias = self.action_bias.to(self.device)
 
     def forward(self, state):
         x = F.relu(self.linear1(state))
@@ -91,15 +80,19 @@ class GaussianPolicy(nn.Module):
         mean, log_std = self.forward(state)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        y_t = torch.tanh(x_t).to(self.device)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = normal.log_prob(x_t)
-        # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-8)
-        log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean
+        # # Reparameterization trick
+        # eps = torch.randn_like(mean)
+        # u = eps * std + mean # u ~ N(mean, std^2)
+        # action = torch.tanh(u).to(self.device)
+        # # Enforcing action bounds
+        # log_prob = normal.log_prob(u) - torch.log((1 - action.pow(2)) + 1e-8)
+        # log_prob = log_prob.sum(1, keepdim=True)
+
+        u = normal.rsample()
+        action = torch.tanh(u).to(self.device)
+        log_prob = normal.log_prob(u).sum(1, keepdim=True)
+
+        return action, log_prob
 
 
 class SAC:
@@ -114,7 +107,8 @@ class SAC:
         gamma=0.99,
         tau=0.005,
         lr=0.0003,
-        alpha=0.2
+        alpha=0.2,
+        auto_entropy_tuning=True
     ):
         self.env = env
         self.n_state = env.observation_space.shape[0]
@@ -127,71 +121,116 @@ class SAC:
         self.tau = tau
         self.lr = lr
         self.alpha = alpha
+        self.auto_entropy_tuning = auto_entropy_tuning
 
         self.global_step = 0
         self.reward_list = []
         self.memory = ReplayBuffer(1000000, self.batch_sz)
-
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # self.device = torch.device('cpu')
+
         self.critic = QNetwork(self.n_state, self.n_action).to(self.device)
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=self.lr)
         self.critic_target = QNetwork(self.n_state, self.n_action).to(self.device)
-        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
-            target_param.data.copy_(param.data)
-        self.policy = GaussianPolicy(self.n_state, self.n_action, 256, self.env.action_space).to(self.device)
-        self.policy_opt = optim.Adam(self.policy.parameters(), lr=self.lr)
+        self.update_target(1.0)
+
+        self.actor = GaussianPolicy(self.n_state, self.n_action, 256).to(self.device)
+        self.actor_opt = optim.Adam(self.actor.parameters(), lr=self.lr)
+
+        if self.auto_entropy_tuning:
+            self.target_entropy = -torch.prod(Tensor(self.env.action_space.shape).to(self.device)).item()
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+            self.alpha_opt = optim.Adam([self.log_alpha], lr=self.lr)
         
-    def select_action(self, state, evaluate=False):
+    def select_action(self, state):
         state = Tensor(state).to(self.device).unsqueeze(0)
-        if evaluate is False:
-            action, _, _ = self.policy.sample(state)
-        else:
-            _, _, action = self.policy.sample(state) # 不懂。。。
+        action, _ = self.actor.sample(state)
         return action.detach().cpu().numpy()[0]
 
-    def update_parameters(self):
+    def sample_batch(self):
+        '''
+        sample a batch from replay buffer
+        '''
         batch_data = self.memory.sample()
         batch_state = Tensor([i.state for i in batch_data]).to(self.device)
         batch_action = Tensor([i.action for i in batch_data]).to(self.device)
         batch_reward = Tensor([i.reward for i in batch_data]).to(self.device).unsqueeze(1)
         batch_next_state = Tensor([i.next_state for i in batch_data]).to(self.device)
+        return batch_state, batch_action, batch_reward, batch_next_state
 
+    def update_critic(self, batch):
+        '''
+        update critic network
+        J = E[0.5 * (Q(s_t, a_t) - (r(s_t, a_t) + gamma * E[V(s_{t+1})]))^2]
+        '''
+        batch_state, batch_action, batch_reward, batch_next_state = batch
         with torch.no_grad():
-            next_state_action, next_state_log_pi, _ = self.policy.sample(batch_next_state)
-            qf1_next_target, qf2_next_target = self.critic_target(batch_next_state, next_state_action)
-            min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
-            next_q_value = batch_reward + self.gamma * (min_qf_next_target)
+            next_action, next_log_pi = self.actor.sample(batch_next_state)
+            target_Q1, target_Q2 = self.critic_target(batch_next_state, next_action)
+            # using Q to estimate V: V(s_t) = E[Q(s_t, a_t) - log(pi(a_t | s_t))]
+            state_value = torch.min(target_Q1, target_Q2) - self.alpha * next_log_pi
+            target_value = batch_reward + self.gamma * (state_value)
         qf1, qf2 = self.critic(batch_state, batch_action)
-        qf1_loss = F.mse_loss(qf1, next_q_value) 
-        qf2_loss = F.mse_loss(qf2, next_q_value) 
+        qf1_loss = F.mse_loss(qf1, target_value) 
+        qf2_loss = F.mse_loss(qf2, target_value) 
         qf_loss = qf1_loss + qf2_loss
 
         self.critic_opt.zero_grad()
         qf_loss.backward()
         self.critic_opt.step()
 
-        pi, log_pi, _ = self.policy.sample(batch_state)
+    def update_actor(self, batch):
+        '''
+        update actor network
+        J = E[alpha * log(pi(a_t | s_t)) - Q(s_t, a_t)]
+        '''
+        batch_state, batch_action, batch_reward, batch_next_state = batch
+        action, log_pi = self.actor.sample(batch_state)
+        target_Q1, target_Q2 = self.critic(batch_state, action)
+        target_Q = torch.min(target_Q1, target_Q2)
+        policy_loss = ((self.alpha * log_pi) - target_Q).mean() 
 
-        qf1_pi, qf2_pi = self.critic(batch_state, pi)
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
-
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() 
-
-        self.policy_opt.zero_grad()
+        self.actor_opt.zero_grad()
         policy_loss.backward()
-        self.policy_opt.step()
+        self.actor_opt.step()
 
+    def update_alpha(self, batch):
+        '''
+        update alpha
+        J = - alpha * log(pi(a_t | s_t) - alpha * hat(H))
+        '''
+        batch_state, batch_action, batch_reward, batch_next_state = batch
+        action, log_pi = self.actor.sample(batch_state)
+        alpha = self.log_alpha.exp()
+        alpha_loss = (- alpha * (log_pi + self.target_entropy).detach()).mean()
+        self.alpha_opt.zero_grad()
+        alpha_loss.backward()
+        self.alpha_opt.step()
+
+        self.alpha = self.log_alpha.exp().detach().cpu().numpy()[0]
+
+    def update_target(self, tau):
+        '''
+        update target critic network
+        target = (1 - tau) * target + tau * current_network
+        '''
+        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
+            target_param.data.copy_(target_param.data * (1-self.tau) + param.data * self.tau)
+
+    def do_update(self):
+        batch = self.sample_batch()
+
+        self.update_critic(batch)
+        self.update_actor(batch)
+        if self.auto_entropy_tuning:
+            self.update_alpha(batch)
         if self.global_step % self.target_update_interval == 0:
-            for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
-                target_param.data.copy_(target_param.data * (1-self.tau) + param.data * self.tau)
+            self.update_target(self.tau)
 
     def train(self, epochs=100):
         for epoch in range(epochs):
             s = self.env.reset()
 
             while True:
-                # self.env.render()
                 if self.global_step < self.start_step:
                     a = self.env.action_space.sample() 
                 else:
@@ -199,7 +238,7 @@ class SAC:
 
                 if len(self.memory) > self.batch_sz:
                     for _ in range(self.n_updates):
-                        self.update_parameters()
+                        self.do_update()
 
                 s_, r, done, _ = self.env.step(a)
                 self.memory.push(s, a, r, s_)
@@ -217,8 +256,7 @@ class SAC:
             s = self.env.reset()
             
             while True:
-                # s = Tensor(s).unsqueeze(0).to(self.device)
-                a = self.select_action(s, evaluate=True)
+                a = self.select_action(s)
                 s_, r, done, _ = self.env.step(a)
                 tot_reward += r
                 if done:
@@ -229,21 +267,19 @@ class SAC:
         self.reward_list.append(tot_reward)
         return tot_reward
 
-    def plot_reward(self):
+    def plot_reward(self, is_show=True):
         plt.plot(self.reward_list)
         plt.title('SAC')
         plt.xlabel('epoch')
         plt.ylabel('reward')
         plt.savefig('SAC.png')
-        plt.show()
+        if is_show:
+            plt.show()
 
-env = gym.make('HalfCheetah-v2')
-env.seed(123456)
-env.action_space.seed(123456)
-torch.manual_seed(123456)
-np.random.seed(123456)
 
-sac = SAC(env)
-sac.train(700)
-sac.plot_reward()
-env.close()
+if __name__ == '__main__':
+    env = gym.make('HalfCheetah-v2')
+    sac = SAC(env)
+    sac.train(700)
+    sac.plot_reward()
+    env.close()
