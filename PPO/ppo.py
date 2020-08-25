@@ -14,6 +14,14 @@ def normal_logprob(x, mean, logstd): # 代入正态分布公式计算概率
     logprob = - 0.5 * math.log(2 * math.pi) - logstd - (x - mean).pow(2) / (2 * std_sq)
     return logprob.sum(1)
 
+def weight_init(m):
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(layer.weight, std)
+        init.constant_(layer.bias, bias_const)
+
+        # nn.init.xavier_normal_(m.weight)
+        # nn.init.constant_(m.bias, 0)
+
 class ActorCriticNet(nn.Module):
 
     def __init__(self, n_inputs, n_outputs):
@@ -64,17 +72,30 @@ class ActorCriticNet(nn.Module):
         return logprob
 
 
-class DataBuffer:
-
-    def __init__(self, name, *args):
-        self.data = namedtuple(name, args)
-        self.buf = []
+class Memory(object):
+    def __init__(self):
+        self.experience = namedtuple(
+            'experience',
+            (
+                'state',
+                'action',
+                'reward',
+                'next_state',
+                'mask',
+                'log_prob',
+                'value'
+            )
+        )
+        self.memory = []
 
     def push(self, *args):
-        self.buf.append(self.data(*args))
+        self.memory.append(self.experience(*args))
+
+    def sample(self):
+        return self.experience(*zip(*self.memory))
 
     def __len__(self):
-        return len(self.buf)
+        return len(self.memory)
 
 
 class PPO:
@@ -82,13 +103,12 @@ class PPO:
     def __init__(
         self,
         env,
-        max_sample_epoch=20,
-        max_sample_step=5000,
+        max_sample_size=2048,
+        max_sample_step=2000,
         batch_sz=256,
         n_update=10,
-        save_per_epoch=100,
         clip=0.2,
-        learning_rate=0.002,
+        learning_rate=3e-4,
         gamma=0.995,
         lambda_=0.97,
         seed=1
@@ -96,11 +116,10 @@ class PPO:
         self.env = env
         self.n_state = env.observation_space.shape[0]
         self.n_action = env.action_space.shape[0]
-        self.max_sample_epoch = max_sample_epoch
+        self.max_sample_size = max_sample_size
         self.max_sample_step = max_sample_step
         self.batch_sz = batch_sz
         self.n_update = n_update
-        self.save_per_epoch = save_per_epoch
         self.clip = clip
         self.learning_rate = learning_rate
         self.gamma = gamma
@@ -110,23 +129,26 @@ class PPO:
         # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = torch.device('cpu')
         self.net = ActorCriticNet(self.n_state, self.n_action).to(self.device)
-        # self.net.load_state_dict(torch.load('model/ppo_10.pth'))
         self.opt = optim.Adam(self.net.parameters(), lr=learning_rate)
 
         self.reward_list = []
+        self.total_sample_size = 0
 
     def select_action(self, a_mean, a_logstd):
         a_std = torch.exp(a_logstd)
         a = torch.normal(a_mean, a_std)
-        return a[0].cpu().detach().numpy(), normal_logprob(a, a_mean, a_logstd).cpu().detach().numpy()
+        return a, normal_logprob(a, a_mean, a_logstd)
 
-    def running_state(self, state):
+    def norm_state(self, state):
+        '''
+        state = (state - mean) / std
+        this will speed up the training
+        '''
+        # 这里也可以通过增量更新维护一个目前所有样本的均值和方差
+        # 会取得更好的效果
         state -= np.mean(state)
         state /= (np.std(state) + 1e-8)
         return state
-
-    def get_KL_divergence(self, logprob_1, logprob_2):
-        return -(torch.exp(logprob_1) * (logprob_1 - logprob_2))
 
     def evaluate(self, n = 1):
         tot_reward = 0
@@ -134,9 +156,10 @@ class PPO:
             s = self.env.reset()
             while True:
                 # self.env.render()
-                s = self.running_state(s)
+                s = self.norm_state(s)
                 a_mean, a_logstd, val = self.net(torch.Tensor(s).unsqueeze(0).to(self.device))
                 a, logprob = self.select_action(a_mean, a_logstd)
+                a = a.cpu().detach().numpy()[0]
                 s_, r, done, _ = self.env.step(a)
                 tot_reward += r
 
@@ -148,117 +171,99 @@ class PPO:
 
     def train(self, epochs):
         for epoch in range(epochs):
-            trace = DataBuffer(
-                'trace_data',
-                'state',
-                'action',
-                'reward',
-                'next_state',
-                'done',
-                'action_mean',
-                'action_logstd',
-                'action_logprob',
-                'value',
-                'tot_reward',
-                'advantage'
-            )
+            memory = Memory()
 
             # 采样数据
-            for sample_epoch in range(self.max_sample_epoch):
-                tmp_trace = DataBuffer(
-                    'tmp_trace',
-                    'state',
-                    'action',
-                    'reward',
-                    'next_state',
-                    'done',
-                    'action_mean',
-                    'action_logstd',
-                    'action_logprob',
-                    'value'
-                )
+            sample_size = 0
+            while sample_size < self.max_sample_size:
                 s = self.env.reset()
+                tot_reward = 0
+                s = self.norm_state(s)
 
                 # 采集一轮数据
-                for _ in range(self.max_sample_step):
+                for step in range(self.max_sample_step):
                     # self.env.render()
-                    s = self.running_state(s)
                     a_mean, a_logstd, val = self.net(torch.Tensor(s).unsqueeze(0).to(self.device))
-                    print(a_logstd.exp())
                     a, logprob = self.select_action(a_mean, a_logstd)
+                    a = a.cpu().detach().numpy()[0]
+                    logprob = logprob.cpu().detach().numpy()[0]
                     s_, r, done, _ = self.env.step(a)
+                    s_ = self.norm_state(s_)
+                    tot_reward += r
+                    mask = 0 if done else 1
 
-                    tmp_trace.push(s, a, r, s_, done, a_mean.cpu().detach().numpy(), a_logstd.cpu().detach().numpy(), logprob, val.cpu().detach().numpy()[0][0])
+                    # 这里需要保证push的state和next state都是标准化过的
+                    memory.push(s, a, r, s_, mask, logprob, val)
 
                     if done:
                         break
                     s = s_
+                sample_size += step
 
-                # 计算total reward和advantage
-                trace_len = len(tmp_trace)
-                tot_reward_list = np.zeros(trace_len)
-                advantage_list = np.zeros(trace_len)
-                deltas = np.zeros(trace_len)
-                tot_reward = 0.0
-                prev_value = 0.0
-                prev_advantage = 0.0
-                for i in reversed(range(trace_len)):
-                    tot_reward = tmp_trace.buf[i].reward + self.gamma * tot_reward
-                    tot_reward_list[i] = tot_reward
-                    deltas[i] = tmp_trace.buf[i].reward + self.gamma * prev_value - tmp_trace.buf[i].value
-                    advantage_list[i] = deltas[i] + self.gamma * self.lambda_ * prev_advantage 
-                    # advantage_list[i] = (advantage_list[i] - np.mean(advantage_list[i])) / (np.std(advantage_list[i]) + 1e-8)
+            # 计算total reward和advantage
+            batch = memory.sample()
+            batch_size = len(memory)
 
-                    prev_value = tmp_trace.buf[i].value
-                    prev_advantage = advantage_list[i]
+            states = Tensor(batch.state)
+            actions = Tensor(batch.action)
+            rewards = Tensor(batch.reward)
+            next_states = Tensor(batch.next_state)
+            masks = Tensor(batch.mask)
+            oldlogprob = Tensor(batch.log_prob)
+            values = Tensor(batch.value)
 
-                # 记录数据
-                for i in range(trace_len):
-                    trace.push(*tuple(tmp_trace.buf[i]), tot_reward_list[i], advantage_list[i])
+            tot_rewards = Tensor(batch_size)
+            deltas = Tensor(batch_size)
+            advantages = Tensor(batch_size)
 
-            # print('finish sample')
+            prev_tot_reward = 0
+            prev_value = 0
+            prev_advantage = 0
+
+            for i in reversed(range(batch_size)):
+                tot_rewards[i] = rewards[i] + self.gamma * prev_tot_reward * masks[i]
+                deltas[i] = rewards[i] + self.gamma * prev_value * masks[i] - values[i]
+                advantages[i] = deltas[i] + self.gamma * self.lambda_ * prev_advantage * masks[i]
+
+                prev_tot_reward = tot_rewards[i]
+                prev_value = values[i]
+                prev_advantage = advantages[i]
+
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
             # 更新网络
-            for _ in range(self.n_update):
-                # print(len(trace))
-                batch_trace = random.sample(trace.buf, k=min(self.batch_sz, len(trace)))
-                batch_state = Tensor([i.state for i in batch_trace]).to(self.device)
-                batch_action = Tensor([i.action for i in batch_trace]).to(self.device)
-                batch_value = Tensor([i.value for i in batch_trace]).to(self.device)
-                batch_oldlogprob = Tensor([i.action_logprob for i in batch_trace]).to(self.device)
+            for _ in range((self.n_update * batch_size) // self.batch_sz):
+                batch_idx = np.random.choice(batch_size, self.batch_sz, replace=False)
+                batch_state = states[batch_idx]
+                batch_action = actions[batch_idx]
+                batch_value = values[batch_idx]
+                batch_oldlogprob = oldlogprob[batch_idx]
                 batch_newlogprob = self.net.get_logprob(batch_state, batch_action)
-                batch_advantage = Tensor([i.advantage for i in batch_trace]).to(self.device)
-                batch_tot_reward = Tensor([i.tot_reward for i in batch_trace]).to(self.device)
-                batch_newvalue = self.net._forward_critic(batch_state)
+                batch_advantage = advantages[batch_idx]
+                batch_tot_rewards = tot_rewards[batch_idx]
+                # 必须要flatten保证batch_newvalue和batch_tot_rewards的size相同
+                # 不同的size会在求loss时广播得到错误的loss值，并且有的时候pytorch不会给出warning
+                # batch_newvalue = self.net._forward_critic(batch_state)
+                batch_newvalue = self.net._forward_critic(batch_state).flatten() 
 
                 policy_ratio = torch.exp(batch_newlogprob - batch_oldlogprob)
                 surrogate_1 = policy_ratio * batch_advantage
                 surrogate_2 = policy_ratio.clamp(1-self.clip, 1+self.clip) * batch_advantage
                 loss_surr = torch.mean(torch.min(surrogate_1, surrogate_2))
 
-                loss_critic = torch.mean((batch_newvalue - batch_tot_reward).pow(2))
-                loss_kl = torch.mean(self.get_KL_divergence(batch_newlogprob, batch_oldlogprob))
+                loss_critic = torch.mean((batch_newvalue - batch_tot_rewards).pow(2))
                 loss_entropy = torch.mean(torch.exp(batch_newlogprob) * batch_newlogprob)
 
-                loss = - loss_surr + 0.5 * loss_critic 
-                # loss = - loss_surr + 0.5 * loss_critic + 0.01 * loss_entropy
+                loss = - loss_surr + 0.5 * loss_critic - 0.01 * loss_entropy
 
                 self.opt.zero_grad()
                 loss.backward()
                 self.opt.step()
 
-            # print('finish update')
-
-            # ep_ratio = 1 - (epoch / epochs)
-            # self.clip = 0.2 * ep_ratio
-
             # 评估网络
-            eval_reward = self.evaluate(5)
+            eval_reward = self.evaluate()
             self.reward_list.append(eval_reward)
             print('epoch', epoch, ':', eval_reward)
-
-            if epoch % self.save_per_epoch == self.save_per_epoch-1:
-                PATH = 'model/ppo_%d.pth'%(epoch)
-                torch.save(self.net.state_dict(), PATH)
 
     def plot_reward(self):
         plt.plot(self.reward_list)
@@ -268,29 +273,14 @@ class PPO:
         plt.savefig('PPO.png')
         plt.show()
 
-epochs = 100
-# env = gym.make('HalfCheetah-v2')
-env = gym.make('Hopper-v2')
 
-ppo = PPO(
-    env
-)
-ppo.train(700)
-ppo.plot_reward()
+if __name__ == '__main__':
 
-# for epoch in range(epochs):
-#     s = env.reset()
-#     tot_r = 0
+    env = gym.make('HalfCheetah-v2')
+    # env = gym.make('Hopper-v2')
 
-#     while True:
-#         env.render()
-#         a = env.action_space.sample()
-#         print(a)
-#         s_, r, done, _ = env.step(a)
-#         # print(len(s_), r, done)
-#         tot_r += r
-
-#         s = s_
-#         if done:
-#             break
-#     # print(tot_r)
+    ppo = PPO(
+        env
+    )
+    ppo.train(5000)
+    ppo.plot_reward()
