@@ -1,13 +1,14 @@
 import torch
 from torch import nn, optim, Tensor
 import torch.nn.functional as F 
+from torch.utils.tensorboard import SummaryWriter
 import gym
 import matplotlib.pyplot as plt
 import numpy as np 
 
 from collections import namedtuple, deque
 import random
-
+import shutil
 
 class ReplayBuffer():
 
@@ -103,6 +104,7 @@ class SAC:
         batch_sz=256,
         start_step=10000,
         target_update_interval=1,
+        evaluate_interval=1,
         n_updates=1,
         gamma=0.99,
         tau=0.005,
@@ -116,6 +118,7 @@ class SAC:
         self.batch_sz = batch_sz
         self.start_step = start_step
         self.target_update_interval = target_update_interval
+        self.evaluate_interval = evaluate_interval
         self.n_updates = n_updates
         self.gamma = gamma
         self.tau = tau
@@ -123,10 +126,14 @@ class SAC:
         self.alpha = alpha
         self.auto_entropy_tuning = auto_entropy_tuning
 
+        self.global_epoch = 0
         self.global_step = 0
         self.reward_list = []
         self.memory = ReplayBuffer(1000000, self.batch_sz)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        LOG_PATH = './log'
+        shutil.rmtree(LOG_PATH, ignore_errors=True)
+        self.writer = SummaryWriter(LOG_PATH)
 
         self.critic = QNetwork(self.n_state, self.n_action).to(self.device)
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=self.lr)
@@ -143,7 +150,8 @@ class SAC:
         
     def select_action(self, state):
         state = Tensor(state).to(self.device).unsqueeze(0)
-        action, _ = self.actor.sample(state)
+        action, log_prob = self.actor.sample(state)
+        self.writer.add_scalar('Action probability', log_prob.exp(), self.global_epoch)
         return action.detach().cpu().numpy()[0]
 
     def sample_batch(self):
@@ -169,13 +177,14 @@ class SAC:
             # using Q to estimate V: V(s_t) = E[Q(s_t, a_t) - log(pi(a_t | s_t))]
             state_value = torch.min(target_Q1, target_Q2) - self.alpha * next_log_pi
             target_value = batch_reward + self.gamma * (state_value)
-        qf1, qf2 = self.critic(batch_state, batch_action)
-        qf1_loss = F.mse_loss(qf1, target_value) 
-        qf2_loss = F.mse_loss(qf2, target_value) 
-        qf_loss = qf1_loss + qf2_loss
+        current_Q1, current_Q2 = self.critic(batch_state, batch_action)
+        Q1_loss = F.mse_loss(current_Q1, target_value) 
+        Q2_loss = F.mse_loss(current_Q2, target_value) 
+        Q_loss = Q1_loss + Q2_loss
+        self.writer.add_scalar('Q loss', Q_loss, self.global_epoch)
 
         self.critic_opt.zero_grad()
-        qf_loss.backward()
+        Q_loss.backward()
         self.critic_opt.step()
 
     def update_actor(self, batch):
@@ -188,6 +197,7 @@ class SAC:
         target_Q1, target_Q2 = self.critic(batch_state, action)
         target_Q = torch.min(target_Q1, target_Q2)
         policy_loss = ((self.alpha * log_pi) - target_Q).mean() 
+        self.writer.add_scalar('Policy loss', policy_loss, self.global_epoch)
 
         self.actor_opt.zero_grad()
         policy_loss.backward()
@@ -202,11 +212,13 @@ class SAC:
         action, log_pi = self.actor.sample(batch_state)
         alpha = self.log_alpha.exp()
         alpha_loss = (- alpha * (log_pi + self.target_entropy).detach()).mean()
+        self.writer.add_scalar('Alpha loss', alpha_loss, self.global_epoch)
         self.alpha_opt.zero_grad()
         alpha_loss.backward()
         self.alpha_opt.step()
 
         self.alpha = self.log_alpha.exp().detach().cpu().numpy()[0]
+        self.writer.add_scalar('Alpha', self.alpha, self.global_epoch)
 
     def update_target(self, tau):
         '''
@@ -246,9 +258,14 @@ class SAC:
                 if done:
                     break
                 s = s_
-            if epoch % 10 == 0:
+
+            self.global_epoch += 1
+
+            if self.global_epoch % self.evaluate_interval == 0:
                 eval_r = self.evaluate()
-                print(epoch, ':', eval_r)
+                self.writer.add_scalar('Total reward', eval_r, self.global_epoch)
+
+            print('Finish epoch %d' % self.global_epoch)
 
     def evaluate(self, n=1):
         tot_reward = 0
@@ -279,6 +296,7 @@ class SAC:
 
 if __name__ == '__main__':
     env = gym.make('HalfCheetah-v2')
+    # env = gym.make('Hopper-v2')
     sac = SAC(env)
     sac.train(700)
     sac.plot_reward()
