@@ -93,6 +93,7 @@ class DDPG(BaseAgent):
         sigma=0.2,
         replay_buffer_size=1e6
     ): 
+        BaseAgent.__init__(self)
         self.env_name = env_name
         self.env = env
         self.batch_size = batch_size
@@ -120,14 +121,6 @@ class DDPG(BaseAgent):
             'next_state',
             'mask'
         )
-
-        self.global_epoch = 0
-        self.global_step = 0
-        self.reward_list = []
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        LOG_PATH = './log'
-        shutil.rmtree(LOG_PATH, ignore_errors=True)
-        self.writer = SummaryWriter(LOG_PATH)
 
         self.actor = DeterministicPolicy(self.n_state, self.n_action).to(self.device)
         self.target_actor = DeterministicPolicy(self.n_state, self.n_action).to(self.device)
@@ -176,7 +169,6 @@ class DDPG(BaseAgent):
             s = self.env.reset()
 
             while True:
-                
                 a = self.select_action(s)
                 s_, r, done, _ = self.env.step(a)
                 mask = 0 if done else 1

@@ -7,3 +7,5 @@
 1. DQN 
 2. SAC
 3. PPO
+4. DDPG
+5. D4PG

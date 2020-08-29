@@ -5,28 +5,15 @@ import shutil
 
 
 class BaseAgent:
+    """A base agent that realizes universal method for a complex agent
 
-    def __init__(
-        self,
-        env_name,
-        env,
-        batch_size=256,
-        gamma=0.99,
-        lr=3e-4,
-        start_step=1000,
-        target_update_interval=10,
-        evaluate_interval=10
-    ):
-        # user-set parameters
-        self.env_name = env_name
-        self.env = env
-        self.batch_size = batch_size
-        self.gamma = gamma
-        self.lr = lr
-        self.start_step = start_step
-        self.target_update_interval = target_update_interval
-        self.evaluate_interval = evaluate_interval
+    Some method to load, save and update model, evaluate the algorithm and 
+    so on are provided.
 
+    The user should implement select_action and train in the subclass.
+    """
+
+    def __init__(self):
         # auto-set parameters
         self.global_epoch = 0
         self.global_step = 0
@@ -90,24 +77,12 @@ class RandomAgent(BaseAgent):
         self,
         env_name,
         env,
-        batch_size=256,
-        gamma=0.99,
-        lr=3e-4,
-        start_step=1000,
-        target_update_interval=10,
         evaluate_interval=10
     ):
-        BaseAgent.__init__(
-            self,
-            env_name,
-            env,
-            batch_size,
-            gamma,
-            lr,
-            start_step,
-            target_update_interval,
-            evaluate_interval
-        )
+        BaseAgent.__init__(self)
+        self.env_name = env_name
+        self.env = env
+        self.evaluate_interval = evaluate_interval
 
     def select_action(self, state, is_evaluate=False):
         a = self.env.action_space.sample() 
@@ -131,4 +106,5 @@ class RandomAgent(BaseAgent):
             if self.global_epoch % self.evaluate_interval == 0:
                 eval_r = self.evaluate()
                 self.writer.add_scalar('reward/random_agent_total_reward', eval_r, self.global_epoch)
+                print('epoch:', self.global_epoch, 'reward:', eval_r)
 
