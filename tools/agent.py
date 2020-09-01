@@ -49,6 +49,7 @@ class BaseAgent:
             s = self.env.reset()
 
             while True:
+                self.env.render()
                 a = self.select_action(s, is_evaluate=True)
                 s_, r, done, _ = self.env.step(a)
                 total_reward += r

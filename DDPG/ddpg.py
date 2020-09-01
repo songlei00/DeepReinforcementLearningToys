@@ -196,7 +196,7 @@ class DDPG(BaseAgent):
                 s = s_
 
             self.global_epoch += 1
-            # print('Finish epoch:', self.global_epoch)
+            print('Finish epoch:', self.global_epoch)
 
             if self.global_epoch % self.evaluate_interval == 0:
                 eval_r = self.evaluate()
@@ -205,10 +205,11 @@ class DDPG(BaseAgent):
 
 
 if __name__ == '__main__':
-    # env = gym.make('Pendulum-v0')
-    env = gym.make('HalfCheetah-v2')
+    # env_name = 'HalfCheetah-v2'
+    env_name = 'Pendulum-v0'
+    env = gym.make(env_name)
     agent = DDPG(
-        'DDPG',
+        'DDPG_'+env_name,
         env
     )
     agent.train(2000)
