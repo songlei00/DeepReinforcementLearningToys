@@ -87,4 +87,9 @@ class TD3(BaseAgent):
         action = self.actor(state)
         return action.cpu().data.numpy()
 
-    
+    def train(self, epochs):
+        for _ in range(epochs):
+            s = self.env.reset()
+
+            while True:
+                
