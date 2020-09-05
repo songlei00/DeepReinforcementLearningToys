@@ -1,57 +1,14 @@
-from tools.memory import Memory 
-from tools.agent import BaseAgent
+import sys
+sys.path.append('../tools')
+from agent import BaseAgent
+from memory import Memory
+from network import DeterministicPolicy, QFunction
+
 import torch
 from torch import nn, optim, Tensor
 import torch.nn.functional as F 
-from torch.utils.tensorboard import SummaryWriter
 import gym
-import matplotlib.pyplot as plt
 import numpy as np 
-import shutil
-
-
-def weight_init(layer):
-    if isinstance(layer, nn.Linear):
-        nn.init.xavier_normal_(layer.weight)
-        nn.init.constant_(layer.bias, 0)
-
-
-class DeterministicPolicy(nn.Module):
-
-    def __init__(self, n_inputs, n_outputs, n_hidden=256):
-        super(DeterministicPolicy, self).__init__()
-        # TODO: add BN layer
-        self.net = nn.Sequential(
-            nn.Linear(n_inputs, n_hidden),
-            nn.ReLU(),
-            nn.Linear(n_hidden, n_hidden),
-            nn.ReLU(),
-            nn.Linear(n_hidden, n_outputs),
-            nn.Tanh()
-        )
-        self.apply(weight_init)
-        
-    def forward(self, x):
-        return self.net(x)
-
-
-class QFunction(nn.Module):
-
-    def __init__(self, n_inputs, n_outputs, n_hidden=256):
-        super(QFunction, self).__init__()
-        # TODO: add BN layer
-        self.net = nn.Sequential(
-            nn.Linear(n_inputs, n_hidden),
-            nn.ReLU(),
-            nn.Linear(n_hidden, n_hidden),
-            nn.ReLU(),
-            nn.Linear(n_hidden, n_outputs)
-        )
-        self.apply(weight_init)
-
-    def forward(self, state, action):
-        x = torch.cat([state, action], 1)
-        return self.net(x)
 
 
 class OUNoise:
@@ -195,13 +152,14 @@ class DDPG(BaseAgent):
                     break
                 s = s_
 
-            self.global_epoch += 1
-            print('Finish epoch:', self.global_epoch)
+            # print('Finish epoch:', self.global_epoch)
 
             if self.global_epoch % self.evaluate_interval == 0:
                 eval_r = self.evaluate()
                 self.writer.add_scalar('total_reward', eval_r, self.global_epoch)
                 print('epoch', self.global_epoch, eval_r)
+
+            self.global_epoch += 1
 
 
 if __name__ == '__main__':

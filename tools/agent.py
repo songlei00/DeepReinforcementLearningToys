@@ -2,6 +2,7 @@ from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import torch
 import shutil
+import os
 
 
 class BaseAgent:
@@ -20,7 +21,7 @@ class BaseAgent:
         self.reward_list = []
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         LOG_PATH = './log'
-        shutil.rmtree(LOG_PATH, ignore_errors=True)
+        # shutil.rmtree(LOG_PATH, ignore_errors=True)
         self.writer = SummaryWriter(LOG_PATH)
 
     def select_action(self, state, is_evaluate=False):
@@ -33,7 +34,7 @@ class BaseAgent:
         torch.save(model.state_dict(), path)
 
     def load_model(self, model, path):
-        model.load_state(torch.load(path))
+        model.load_state_dict(torch.load(path))
 
     def update_target(self, target_net, net, tau=1):
         """update target network, tau=1 means hard update
@@ -43,13 +44,14 @@ class BaseAgent:
         for target_param, param in zip(target_net.parameters(), net.parameters()):
             target_param.data.copy_((1-tau) * target_param.data + tau * param.data)
 
-    def evaluate(self, epochs=1):
+    def evaluate(self, epochs=1, is_render=False):
         total_reward = 0
         for _ in range(epochs):
             s = self.env.reset()
 
             while True:
-                self.env.render()
+                if is_render:
+                    self.env.render()
                 a = self.select_action(s, is_evaluate=True)
                 s_, r, done, _ = self.env.step(a)
                 total_reward += r

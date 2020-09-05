@@ -5,10 +5,11 @@ from torch.utils.tensorboard import SummaryWriter
 import gym
 import matplotlib.pyplot as plt
 import numpy as np 
-
+import os
 from collections import namedtuple, deque
 import random
 import shutil
+
 
 class ReplayBuffer():
 
@@ -81,17 +82,13 @@ class GaussianPolicy(nn.Module):
         mean, log_std = self.forward(state)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
-        # # Reparameterization trick
-        # eps = torch.randn_like(mean)
-        # u = eps * std + mean # u ~ N(mean, std^2)
-        # action = torch.tanh(u).to(self.device)
-        # # Enforcing action bounds
-        # log_prob = normal.log_prob(u) - torch.log((1 - action.pow(2)) + 1e-8)
-        # log_prob = log_prob.sum(1, keepdim=True)
-
-        u = normal.rsample()
+        # Reparameterization trick
+        eps = torch.randn_like(mean)
+        u = eps * std + mean # u ~ N(mean, std^2)
         action = torch.tanh(u).to(self.device)
-        log_prob = normal.log_prob(u).sum(1, keepdim=True)
+        # Enforcing action bounds
+        log_prob = normal.log_prob(u) - torch.log((1 - action.pow(2)) + 1e-8)
+        log_prob = log_prob.sum(1, keepdim=True)
 
         return action, log_prob
 
@@ -110,7 +107,9 @@ class SAC:
         tau=0.005,
         lr=0.0003,
         alpha=0.2,
-        auto_entropy_tuning=True
+        auto_entropy_tuning=True,
+        save_model_interval=100,
+        is_load_model=False
     ):
         self.env = env
         self.n_state = env.observation_space.shape[0]
@@ -125,6 +124,7 @@ class SAC:
         self.lr = lr
         self.alpha = alpha
         self.auto_entropy_tuning = auto_entropy_tuning
+        self.save_model_interval = save_model_interval
 
         self.global_epoch = 0
         self.global_step = 0
@@ -143,6 +143,10 @@ class SAC:
         self.actor = GaussianPolicy(self.n_state, self.n_action, 256).to(self.device)
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=self.lr)
 
+        if is_load_model:
+            self.load_model()
+            print('load model')
+
         if self.auto_entropy_tuning:
             self.target_entropy = -torch.prod(Tensor(self.env.action_space.shape).to(self.device)).item()
             self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
@@ -151,7 +155,6 @@ class SAC:
     def select_action(self, state):
         state = Tensor(state).to(self.device).unsqueeze(0)
         action, log_prob = self.actor.sample(state)
-        self.writer.add_scalar('Action probability', log_prob.exp(), self.global_epoch)
         return action.detach().cpu().numpy()[0]
 
     def sample_batch(self):
@@ -181,7 +184,7 @@ class SAC:
         Q1_loss = F.mse_loss(current_Q1, target_value) 
         Q2_loss = F.mse_loss(current_Q2, target_value) 
         Q_loss = Q1_loss + Q2_loss
-        self.writer.add_scalar('Q loss', Q_loss, self.global_epoch)
+        # self.writer.add_scalar('Q loss', Q_loss, self.global_epoch)
 
         self.critic_opt.zero_grad()
         Q_loss.backward()
@@ -197,7 +200,7 @@ class SAC:
         target_Q1, target_Q2 = self.critic(batch_state, action)
         target_Q = torch.min(target_Q1, target_Q2)
         policy_loss = ((self.alpha * log_pi) - target_Q).mean() 
-        self.writer.add_scalar('Policy loss', policy_loss, self.global_epoch)
+        # self.writer.add_scalar('Policy loss', policy_loss, self.global_epoch)
 
         self.actor_opt.zero_grad()
         policy_loss.backward()
@@ -212,7 +215,7 @@ class SAC:
         action, log_pi = self.actor.sample(batch_state)
         alpha = self.log_alpha.exp()
         alpha_loss = (- alpha * (log_pi + self.target_entropy).detach()).mean()
-        self.writer.add_scalar('Alpha loss', alpha_loss, self.global_epoch)
+        # self.writer.add_scalar('Alpha loss', alpha_loss, self.global_epoch)
         self.alpha_opt.zero_grad()
         alpha_loss.backward()
         self.alpha_opt.step()
@@ -265,7 +268,22 @@ class SAC:
                 eval_r = self.evaluate()
                 self.writer.add_scalar('Total reward', eval_r, self.global_epoch)
 
+            if self.global_epoch % self.save_model_interval == 0:
+                self.save_model()
+
             print('Finish epoch %d' % self.global_epoch)
+
+    def load_model(self, epoch=100):
+        self.critic.load_state_dict(torch.load('./model/critic_'+str(epoch)+'.pth'))
+        self.critic_target.load_state_dict(torch.load('./model/critic_target_'+str(epoch)+'.pth'))
+        self.actor.load_state_dict(torch.load('./model/actor_'+str(epoch)+'.pth'))
+
+    def save_model(self):
+        if not os.path.exists('model'):
+            os.mkdir('model')
+        torch.save(self.critic.state_dict(), './model/critic_'+str(self.global_epoch)+'.pth')
+        torch.save(self.critic_target.state_dict(), './model/critic_target_'+str(self.global_epoch)+'.pth')
+        torch.save(self.actor.state_dict(), './model/actor_'+str(self.global_epoch)+'.pth')
 
     def evaluate(self, n=1):
         tot_reward = 0
@@ -298,6 +316,5 @@ if __name__ == '__main__':
     env = gym.make('HalfCheetah-v2')
     # env = gym.make('Hopper-v2')
     sac = SAC(env)
-    sac.train(700)
-    sac.plot_reward()
+    sac.train(200)
     env.close()
