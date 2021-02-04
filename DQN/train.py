@@ -6,7 +6,6 @@ from torch.nn import Sequential, Conv2d, ReLU, Linear, Softmax, Flatten
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 from PIL import Image
-import argparse
 from datetime import datetime
 import numpy as np
 
@@ -15,11 +14,14 @@ sys.path.append('..')
 from common.utils import Memory
 import os
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--env_name', type=str, default='SpaceInvaders-v0')
-args = parser.parse_args()
-
+# if torch.backends.cudnn.enabled:
+#     torch.backends.cudnn.benchmark = False
+#     torch.backends.cudnn.deterministic = True
+#
+# seed = 777
+# torch.manual_seed(seed)
+# np.random.seed(seed)
+# random.seed(seed)
 
 class Network(nn.Module):
 
@@ -38,15 +40,26 @@ class Network(nn.Module):
             Linear(512, output_size),
             # Softmax(),
         )
+        self.initialize()
 
     def forward(self, x):
         x = self.net(x)
         return x
 
+    def initialize(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight.data)
+                nn.init.constant_(m.bias.data, 0.1)
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight.data)
+                nn.init.constant_(m.bias.data, 0.1)
+
 
 class DQN:
 
     def __init__(self,
+                 env_name,
                  env,
                  batch_size=32,
                  replay_memory_size=1e6,
@@ -60,8 +73,9 @@ class DQN:
                  final_epsilon=0.1,
                  epsilon_decay_step=1e6,
                  warmup_step=5e4,
-                 save_model_frequency=100,
-                 eval_frequency=20):
+                 save_model_frequency=20,
+                 eval_frequency=1):
+        self.env_name = env_name
         self.env = env
         self.batch_size = batch_size
         self.replay_memory_size = replay_memory_size
@@ -80,6 +94,7 @@ class DQN:
 
         self.epsilon = self.initial_epsilon
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print('Train on device:', self.device)
 
         self.memory = Memory(int(replay_memory_size), batch_size)
         self.net = Network(self.env.action_space.n).to(self.device)
@@ -87,11 +102,10 @@ class DQN:
         self.target_net = Network(self.env.action_space.n).to(self.device)
         self.update_model(self.target_net, self.net)
         self.opt = optim.RMSprop(self.net.parameters(), lr=self.lr, alpha=self.gradient_momentum)
-        self.writer = SummaryWriter('./logs/DQN_{}_{}'.format(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name))
+        self.writer = SummaryWriter('./logs/DQN_{}_{}'.format(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), self.env_name))
         self.loss_fn = F.mse_loss
 
         self.total_step = 0
-        self.reward_list = []
 
     def select_action(self, state, is_test=False):
         epsilon = 0.05 if is_test else self.epsilon
@@ -108,15 +122,19 @@ class DQN:
         self.opt.zero_grad()
         loss.backward()
         # for param in self.net.parameters():
-        #     param.grad.data.clamp_(-1, 1)
+        #     if param.grad is not None:
+        #         param.grad.data.clamp_(-1, 1)
+        for p in filter(lambda p: p.grad is not None, self.net.parameters()):
+            p.grad.data.clamp_(min=-1, max=1)
+
         self.opt.step()
 
     def compute_loss(self, batch):
         batch_state, batch_action, batch_reward, batch_next_state, batch_done = batch.state, batch.action, batch.reward, batch.next_state, batch.done
-        batch_state = torch.tensor(batch_state, dtype=torch.float).to(self.device)
+        batch_state = torch.tensor(batch_state, dtype=torch.float, requires_grad=True).to(self.device)
         batch_action = torch.tensor(batch_action, dtype=torch.long).to(self.device)
-        batch_reward = torch.tensor(batch_reward, dtype=torch.float).to(self.device)
-        batch_next_state = torch.tensor(batch_next_state, dtype=torch.float).to(self.device)
+        batch_reward = torch.tensor(batch_reward, dtype=torch.float, requires_grad=True).to(self.device)
+        batch_next_state = torch.tensor(batch_next_state, dtype=torch.float, requires_grad=True).to(self.device)
         batch_mask = torch.tensor([not i for i in batch_done], dtype=torch.bool).to(self.device)
 
         pred_q = self.net(batch_state)
@@ -136,7 +154,7 @@ class DQN:
             s = self.preprocess(s)
             s = np.stack((s[0], s[0], s[0], s[0]), axis=0)
             while True:
-                self.env.render()
+                # self.env.render()
 
                 if self.total_step < self.warmup_step:
                     a = env.action_space.sample()
@@ -146,6 +164,10 @@ class DQN:
                 s_, r, done, _ = env.step(a)
                 s_ = self.preprocess(s_)
                 s_ = np.stack((s[1], s[2], s[3], s_[0]), axis=0)
+                if r > 0:
+                    r = 1
+                elif r < 0:
+                    r = -1
                 self.memory.push(s, a, r, s_, done)
                 s = s_
                 self.total_step += 1
@@ -198,10 +220,12 @@ class DQN:
         for _ in range(epochs):
             s = self.env.reset()
             s = self.preprocess(s)
+            s = np.stack((s[0], s[0], s[0], s[0]), axis=0)
             while True:
                 a = self.select_action(s, is_test=True)
                 s_, r, done, _ = self.env.step(a)
                 s_ = self.preprocess(s_)
+                s_ = np.stack((s[1], s[2], s[3], s_[0]), axis=0)
                 total_r += r
                 s = s_
                 if done:
@@ -212,7 +236,7 @@ class DQN:
 
 env_name = ['SpaceInvaders-v0', 'Breakout', 'Pong', 'Tennis', 'Freeway']
 
-env = gym.make(args.env_name)
+env = gym.make(env_name[0])
 
-dqn = DQN(env, warmup_step=50)
+dqn = DQN(env_name[0], env)
 dqn.train(2000)
