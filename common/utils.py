@@ -2,6 +2,7 @@ from collections import namedtuple, deque
 import random
 import os
 import torch
+import numpy as np
 
 
 class Memory:
@@ -27,6 +28,37 @@ class Memory:
 
     def __len__(self):
         return len(self.memory)
+
+
+class OUNoise:
+
+    def __init__(self,
+                 size,
+                 mu=0.0,
+                 theta=0.15,
+                 sigma=0.2,
+                 dt=1e-2):
+        self.mu = mu * np.ones(size)
+        self.theta = theta
+        self.sigma = sigma
+        self.dt = dt
+        self.state = np.ones(size)
+        self.reset()
+
+    def reset(self):
+        self.state = np.copy(self.mu)
+
+    def sample(self):
+        dx = self.theta * (self.mu - self.state) * self.dt + \
+             self.sigma * np.sqrt(self.dt) * np.random.normal(size=self.mu.shape)
+        self.state += dx
+        return self.state
+
+    def __call__(self):
+        return self.sample()
+
+    def __repr__(self):
+        return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
 
 
 def save_model(model, path):

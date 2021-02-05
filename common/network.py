@@ -47,7 +47,6 @@ class GaussianActor(nn.Module):
         self.log_std_linear = Linear(hidden_size, output_size)
 
         self.apply(weights_init_)
-
         self.action_scale = 1 if action_scale is None else action_scale
 
     def forward(self, state):
@@ -71,6 +70,30 @@ class GaussianActor(nn.Module):
         action = action.clamp(-self.action_scale, self.action_scale)
 
         return action, log_prob
+
+
+class DeterministicActor(nn.Module):
+
+    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None):
+        super(DeterministicActor, self).__init__()
+        self.net = Sequential(
+            Linear(input_size, hidden_size),
+            ReLU(),
+            Linear(hidden_size, hidden_size),
+            ReLU(),
+            Linear(hidden_size, output_size),
+
+        )
+
+        self.apply(weights_init_)
+        self.action_scale = 1 if action_scale is None else action_scale
+
+    def forward(self, state):
+        x = self.net(state)
+        return torch.tanh(x) * self.action_scale
+
+    def sample(self, state):
+        return self.forward(state)
 
 
 class Critic(nn.Module):

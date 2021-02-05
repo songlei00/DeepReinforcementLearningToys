@@ -2,7 +2,8 @@
 
 ## 算法
 
-A2C
+1. A2C，on-policy
+2. DDPG，off-policy
 
 ## 实验结果
 
@@ -10,6 +11,9 @@ A2C
 
 ## Trick
 
-1. Target net
-2. Experience replay
-3. Running mean std，在RL中通常不使用BN层，但会对状态进行初始化
+1. Target net，DQN，DDPG
+2. Experience replay，DQN，DDPG
+3. Action repeat，DQN，DDPG
+3. Soft update，DDPG
+4. 探索过程加入随机噪声，DDPG中加OU
+5. Running mean std，在RL中通常不使用BN层，但会对状态进行归一化
