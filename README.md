@@ -2,8 +2,8 @@
 
 ## 1. 算法
 
-1. A2C，on-policy
-2. DDPG，off-policy
+1. A2C
+2. DDPG
 
 ## 2. 实验结果
 
@@ -20,6 +20,6 @@
 1. Target net，DQN，DDPG
 2. Experience replay，DQN，DDPG
 3. Action repeat，DQN，DDPG
-3. Soft update，DDPG
-4. 探索过程加入随机噪声，DDPG中加OU
-5. Running mean std，在RL中通常不使用BN层，但会对状态进行归一化
+4. Soft update，DDPG
+5. 探索过程加入随机噪声，DDPG中加OU
+6. Running mean std，利用当前采集到的所有状态对state进行归一化，能够让训练更加稳定(但也增大了计算开销，运行速度会变慢)
