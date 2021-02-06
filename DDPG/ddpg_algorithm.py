@@ -71,6 +71,7 @@ class DDPG:
             s = self.env.reset()
             policy_loss, critic_loss = 0, 0
             while True:
+                self.env.render()
                 a = self.select_action(s)
                 s_, r, done, _ = self.env.step(a)
                 self.memory.push(s, a, r, s_, done)
@@ -101,10 +102,10 @@ class DDPG:
         batch_state, batch_action, batch_reward, batch_next_state, batch_done = \
             batch.state, batch.action, batch.reward, batch.next_state, batch.done
         batch_state = torch.tensor(batch_state, dtype=torch.float).to(self.device)
-        batch_action = torch.tensor(batch_action, dtype=torch.float).reshape(self.batch_size, 1).to(self.device)
-        batch_reward = torch.tensor(batch_reward, dtype=torch.float).reshape(self.batch_size, 1).to(self.device)
+        batch_action = torch.tensor(batch_action, dtype=torch.float).reshape(self.batch_size, -1).to(self.device)
+        batch_reward = torch.tensor(batch_reward, dtype=torch.float).reshape(self.batch_size, -1).to(self.device)
         batch_next_state = torch.tensor(batch_next_state, dtype=torch.float).to(self.device)
-        batch_mask = torch.tensor([not i for i in batch_done], dtype=torch.bool).reshape(self.batch_size, 1).to(self.device)
+        batch_mask = torch.tensor([not i for i in batch_done], dtype=torch.bool).reshape(self.batch_size, -1).to(self.device)
 
         # update critic
         pred_q = self.critic(torch.cat((batch_state, batch_action), dim=-1))

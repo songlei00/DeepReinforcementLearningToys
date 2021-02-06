@@ -82,7 +82,6 @@ class DeterministicActor(nn.Module):
             Linear(hidden_size, hidden_size),
             ReLU(),
             Linear(hidden_size, output_size),
-
         )
 
         self.apply(weights_init_)
