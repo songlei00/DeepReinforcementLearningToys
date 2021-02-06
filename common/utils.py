@@ -61,97 +61,49 @@ class OUNoise:
         return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
 
 
-# class RunningStat:
-#
-#     def __init__(self, shape):
-#         self.n = 0
-#         self.mean = np.zeros(shape)
-#         self.std = np.zeros(shape)
-#
-#     def push(self, x):
-#         x = np.asarray(x)
-#         assert x.shape == self.mean.shape
-#         self.n += 1
-#         if self.n == 1:
-#             self.mean = x
-#         else:
-#             old_mean = self.mean.copy()
-#             self.mean += (x - old_mean) / self.n
-#             self.std += (x - old_mean) * (x - self.mean)
-#
-#
-# class ZFilter:
-#
-#     def __init__(self, shape):
-#         self.rs = RunningStat(shape)
-#
-#     def __call__(self, x, update=True):
-#         if update:
-#             self.rs.push(x)
-#         x = (x - self.rs.mean) / (self.rs.std + 1e-8)
-#         return x
+# http://www.johndcook.com/blog/standard_deviation/
+class RunningStat:
 
-
-class RunningStat(object):
     def __init__(self, shape):
-        self._n = 0
-        self._M = np.zeros(shape)
-        self._S = np.zeros(shape)
+        self.n = 0
+        self.m = np.zeros(shape)
+        self.s = np.zeros(shape)
 
     def push(self, x):
-        x = np.asarray(x)
-        assert x.shape == self._M.shape
-        self._n += 1
-        if self._n == 1:
-            self._M[...] = x
+        x = np.array(x)
+        assert x.shape == self.m.shape
+        self.n += 1
+        if self.n == 1:
+            self.m = x
         else:
-            oldM = self._M.copy()
-            self._M[...] = oldM + (x - oldM) / self._n
-            self._S[...] = self._S + (x - oldM) * (x - self._M)
-
-    @property
-    def n(self):
-        return self._n
+            old_m = self.m.copy()
+            self.m = old_m + (x - old_m) / self.n
+            self.s = self.s + (x - old_m) * (x - self.m)
 
     @property
     def mean(self):
-        return self._M
+        return self.m
 
     @property
     def var(self):
-        return self._S / (self._n - 1) if self._n > 1 else np.square(self._M)
+        return self.s / (self.n - 1) if self.n > 1 else np.zeros(self.m.shape)
 
     @property
     def std(self):
         return np.sqrt(self.var)
 
-    @property
-    def shape(self):
-        return self._M.shape
-
 
 class ZFilter:
-    """
-    y = (x-mean)/std
-    using running estimates of mean,std
-    """
 
-    def __init__(self, shape, demean=True, destd=True, clip=10.0):
-        self.demean = demean
-        self.destd = destd
+    def __init__(self, shape, clip=None):
+        self.rs = RunningStat(shape)
         self.clip = clip
 
-        self.rs = RunningStat(shape)
-        self.fix = False
-
     def __call__(self, x, update=True):
-        if update and not self.fix:
+        if update:
             self.rs.push(x)
-        if self.demean:
-            x = x - self.rs.mean
-        if self.destd:
-            x = x / (self.rs.std + 1e-8)
-        if self.clip:
+        x = (x - self.rs.mean) / (self.rs.std + 1e-8)
+        if self.clip is not None:
             x = np.clip(x, -self.clip, self.clip)
         return x
 
