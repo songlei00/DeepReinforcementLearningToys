@@ -3,6 +3,7 @@ import random
 import os
 import torch
 import numpy as np
+import pickle
 
 
 class Memory:
@@ -61,6 +62,27 @@ class OUNoise:
         return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
 
 
+class GaussianNoise:
+
+    def __init__(self, size, mu=0, std=1, clip=None):
+        self.size = size
+        self.mu = mu
+        self.std = std
+        self.clip = clip
+
+    def sample(self):
+        x = np.random.normal(self.mu, self.std, self.size)
+        if self.clip is not None:
+            x = np.clip(x, -self.clip, self.clip)
+        return x
+
+    def __call__(self):
+        return self.sample()
+
+    def __repr__(self):
+        return 'GaussianNoise(mu={}, std={})'.format(self.mu, self.std)
+
+
 # http://www.johndcook.com/blog/standard_deviation/
 class RunningStat:
 
@@ -106,6 +128,19 @@ class ZFilter:
         if self.clip is not None:
             x = np.clip(x, -self.clip, self.clip)
         return x
+
+    @staticmethod
+    def save(zfilter, path):
+        file = open(path, 'wb')
+        data = pickle.dumps(zfilter)
+        file.write(data)
+        file.close()
+
+    @staticmethod
+    def load(path):
+        with open(path, 'rb') as f:
+            data = pickle.loads(f.read())
+        return data
 
 
 def save_model(model, path):

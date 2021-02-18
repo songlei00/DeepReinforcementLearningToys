@@ -110,3 +110,29 @@ class Critic(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+
+class TwinCritic(nn.Module):
+
+    def __init__(self, input_size, hidden_size=128):
+        super(TwinCritic, self).__init__()
+        self.net1 = Sequential(
+            Linear(input_size, hidden_size),
+            ReLU(),
+            Linear(hidden_size, hidden_size),
+            ReLU(),
+            Linear(hidden_size, 1)
+        )
+
+        self.net2 = Sequential(
+            Linear(input_size, hidden_size),
+            ReLU(),
+            Linear(hidden_size, hidden_size),
+            ReLU(),
+            Linear(hidden_size, 1)
+        )
+
+    def forward(self, x):
+        q1 = self.net1(x)
+        q2 = self.net2(x)
+        return q1, q2

@@ -7,7 +7,7 @@ from common.utils import load_model
 
 
 env_names = ['Pendulum-v0', 'HalfCheetah-v2', 'Hopper-v2']
-env_name = env_names[2]
+env_name = env_names[1]
 env = gym.make(env_name)
 ddpg = DDPG(env_name, env, is_test=True)
 

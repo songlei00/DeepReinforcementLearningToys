@@ -60,10 +60,10 @@ class DDPG:
     def select_action(self, state, is_test=False):
         state = torch.tensor(state, dtype=torch.float).to(self.device)
         if is_test:
+            a = self.actor(state)
+        else:
             a = self.actor(state) + torch.tensor(self.noise(), dtype=torch.float).to(self.device)
             a = a.clip(-self.actor.action_scale, self.actor.action_scale)
-        else:
-            a = self.actor(state)
         return a.cpu().detach().numpy()
 
     def train(self, epochs):
