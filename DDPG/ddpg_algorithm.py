@@ -61,6 +61,7 @@ class DDPG:
         state = torch.tensor(state, dtype=torch.float).to(self.device)
         if is_test:
             a = self.actor(state) + torch.tensor(self.noise(), dtype=torch.float).to(self.device)
+            a = a.clip(-self.actor.action_scale, self.actor.action_scale)
         else:
             a = self.actor(state)
         return a.cpu().detach().numpy()
