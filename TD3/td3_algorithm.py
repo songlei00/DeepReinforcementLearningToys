@@ -99,8 +99,8 @@ class TD3:
                 if done:
                     break
 
-            self.writer.add_scalar('loss/critic_loss', critic_loss, epoch)
-            self.writer.add_scalar('loss/policy_loss', policy_loss, epoch)
+            self.writer.add_scalar('loss/critic_loss', critic_loss, self.total_step)
+            self.writer.add_scalar('loss/policy_loss', policy_loss, self.total_step)
 
             if (epoch + 1) % self.save_model_frequency == 0:
                 save_model(self.critic, 'model/{}_model/critic_{}'.format(self.env_name, epoch))
@@ -110,7 +110,7 @@ class TD3:
             if (epoch + 1) % self.eval_frequency == 0:
                 eval_r = self.evaluate()
                 print('epoch', epoch, 'evaluate reward', eval_r)
-                self.writer.add_scalar('reward', eval_r, epoch)
+                self.writer.add_scalar('reward', eval_r, self.total_step)
                 if eval_r > best_eval:
                     best_eval = eval_r
                     save_model(self.critic, 'model/{}_model/best_critic'.format(self.env_name))
@@ -144,6 +144,7 @@ class TD3:
         self.critic_opt.step()
 
         if (self.total_step + 1) % self.actor_update_frequency == 0:
+            # update actor
             q1, _ = self.critic(torch.cat([batch_state, self.actor(batch_state)], dim=-1))
             policy_loss = - q1.mean()
 
@@ -151,6 +152,7 @@ class TD3:
             policy_loss.backward()
             self.actor_opt.step()
 
+            # update target actor and target critic
             update_model(self.target_critic, self.critic, self.tau)
             update_model(self.target_actor, self.actor, self.tau)
 

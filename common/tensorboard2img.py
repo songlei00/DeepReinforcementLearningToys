@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--csv_path', type=str, required=True)
 parser.add_argument('--save_path', type=str, required=False, default='./img.png')
 parser.add_argument('--title', type=str, required=False, default='RL algorithm')
-parser.add_argument('--xlabel', type=str, required=False, default='epochs')
+parser.add_argument('--xlabel', type=str, required=False, default='the number of samples')
 parser.add_argument('--ylabel', type=str, required=False, default='reward')
 args = parser.parse_args()
 
