@@ -2,11 +2,14 @@
 
 ## 1. 算法
 
-1. A2C
-2. ACKTR
-3. DDPG
-4. TD3
-5. TRPO
+- [x] A2C
+- [ ] ACER
+- [ ] ACKTR
+- [x] DDPG
+- [x] TD3
+- [ ] TRPO
+- [ ] PPO
+- [ ] SAC
 
 ## 2. 代码结构
 
@@ -30,11 +33,11 @@ TODO
 2. Experience replay，DQN，DDPG
 3. Action repeat，在Atari的游戏中，重复执行多次当前动作。DQN，DDPG
 4. Actor和critic的权重共享，在Arari游戏中，共享卷积层的权重
-5. Soft update，$\theta'=\tau \theta + (1-\tau)\theta', \tau << 1$，使得目标值更加稳定，学习过程接近于监督学习。DDPG
+5. Soft update，$\theta'=\tau \theta + (1-\tau)\theta', \tau << 1$，使得目标值更加稳定，学习过程接近于监督学习。DDPG，TD3
 6. Deterministic policy加入随机噪声，促进探索。DDPG中加OU噪声，TD3中加高斯噪声
 7. Running mean std，online地利用当前采集到的所有状态对state进行归一化，能够让训练更加稳定(但也增大了计算开销，运行速度会变慢)，见```common/utils.py:ZFilter```。所有的算法都可以用(有一定的效果。同时需要注意的是训练时要记录当前的state的平均值，在测试时使用，而不是在测试时重新收集数据，计算平均值)
-8. Twin Q network，$y = r + \gamma \min (Q_1(s', \pi(s')), Q_2(s', \pi(s')))$，缓解Q值估计过高的问题。DDPG
-9. Delayed update，减缓更新actor，target critic和target actor。DDPG
+8. Twin Q network，$y = r + \gamma \min (Q_1(s', \pi(s')), Q_2(s', \pi(s')))$，缓解Q值估计过高的问题。TD3
+9. Delayed update，减缓更新actor，target critic和target actor。TD3
 
 ## 5. TODO
 
