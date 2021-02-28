@@ -71,6 +71,12 @@ class GaussianActor(nn.Module):
 
         return action, log_prob
 
+    def get_log_prob(self, state, action):
+        mean, log_std = self.forward(state)
+        normal = Normal(mean, log_std.exp())
+        log_prob = normal.log_prob(action)
+        return log_prob
+
 
 class DeterministicActor(nn.Module):
 
