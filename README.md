@@ -5,7 +5,7 @@
 - [x] A2C
 - [x] DDPG
 - [x] TD3
-- [ ] SAC
+- [x] SAC
 - [x] TRPO(bad)
 - [ ] PPO
 - [ ] ACER
@@ -33,12 +33,14 @@ TODO
 2. Experience replay，DQN，DDPG
 3. Action repeat，在Atari的游戏中，重复执行多次当前动作。DQN，DDPG
 4. Actor和critic的权重共享，在Arari游戏中，共享卷积层的权重
-5. Soft update，$\theta'=\tau \theta + (1-\tau)\theta', \tau << 1$，使得目标值更加稳定，学习过程接近于监督学习。DDPG，TD3
+5. Soft update，$\theta'=\tau \theta + (1-\tau)\theta', \tau << 1$，使得目标值更加稳定，学习过程接近于监督学习。DDPG，TD3，SAC
 6. Deterministic policy加入随机噪声，促进探索。DDPG中加OU噪声，TD3中加高斯噪声
 7. Running mean std，online地利用当前采集到的所有状态对state进行归一化，能够让训练更加稳定(但也增大了计算开销，运行速度会变慢)，见```common/utils.py:ZFilter```。所有的算法都可以用(有一定的效果。同时需要注意的是训练时要记录当前的state的平均值，在测试时使用，而不是在测试时重新收集数据，计算平均值)
-8. Twin Q network，$y = r + \gamma \min (Q_1(s', \pi(s')), Q_2(s', \pi(s')))$，缓解Q值估计过高的问题。TD3
+8. Twin Q network，$y = r + \gamma \min (Q_1(s', \pi(s')), Q_2(s', \pi(s')))$，缓解Q值估计过高的问题。TD3，SAC
 9. Delayed update，减缓更新actor，target critic和target actor。TD3
 10. GAE，更好的advantage估计,$\widehat{A}_t^{GAE(\gamma, \lambda)} = \sum_{l=0}^{\infty}(\gamma\lambda)^l\delta_{t+l}^V$，用$\lambda$控制方差和偏差。应该是所有涉及advantage的算法都能用的，但GAE需要用到整条轨迹的数据，所以一般在on-policy的TRPO、PPO这种先收集一条轨迹的数据再优化的算法中可以使用，而且应该是TRPO和PPO的标配了。(off-policy也可以先收集一条轨迹的数据，再进行优化，似乎好像说这样效果会更好，但off-policy算法的一般实现中都是与环境交互一次，进行一次更新)
+11. Reparameterization trick。SAC
+12. 加入熵。一种方法是熵直接加入Q函数中，在最大化Q的同时最大化熵，例如SAC。另一种策略优化时加入熵作为正则化项。
 11. HER
 
 ## 5. TODO

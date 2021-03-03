@@ -2,29 +2,11 @@ import torch
 from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
-from collections import namedtuple
 
 import sys
 sys.path.append('..')
 from common.network import SACGaussianActor, TwinCritic
 from common.utils import Memory, ZFilter, update_model, save_model
-
-
-class ExtendMemory(Memory):
-
-    def __init__(self, maxlen, sample_size):
-        Memory.__init__(self, maxlen, sample_size)
-        self.experience = namedtuple(
-            'experience',
-            (
-                'state',
-                'action',
-                'log_prob',
-                'reward',
-                'next_state',
-                'done',
-            )
-        )
 
 
 class SAC:
@@ -44,7 +26,7 @@ class SAC:
                  alpha=None,
                  is_test=False,
                  save_model_frequency=200,
-                 eval_frequency=1,
+                 eval_frequency=20,
                  save_log_frequency=20):
         self.env_name = env_name
         self.env = env
@@ -67,7 +49,7 @@ class SAC:
         if not is_test:
             self.writer = SummaryWriter('./logs/SAC_{}'.format(self.env_name))
         self.loss_fn = F.mse_loss
-        self.memory = ExtendMemory(int(replay_memory_size), batch_size)
+        self.memory = Memory(int(replay_memory_size), batch_size)
 
         n_state, n_action = env.observation_space.shape[0], env.action_space.shape[0]
         self.state_normalize = ZFilter(n_state)
@@ -106,9 +88,9 @@ class SAC:
             policy_loss, critic_loss, alpha_loss = 0, 0, 0
             while True:
                 self.env.render()
-                a, log_prob = self.select_action(s)
+                a, _ = self.select_action(s)
                 s_, r, done, _ = self.env.step(a)
-                self.memory.push(s, a, log_prob, r, s_, done)
+                self.memory.push(s, a, r, s_, done)
                 self.total_step += 1
                 if len(self.memory) > self.batch_size and self.total_step > self.warmup_step:
                     policy_loss, critic_loss, alpha_loss = self.learn()
@@ -140,11 +122,10 @@ class SAC:
 
     def learn(self):
         batch = self.memory.sample()
-        batch_state, batch_action, batch_log_prob, batch_reward, batch_next_state, batch_done = \
-            batch.state, batch.action, batch.log_prob, batch.reward, batch.next_state, batch.done
+        batch_state, batch_action, batch_reward, batch_next_state, batch_done = \
+            batch.state, batch.action, batch.reward, batch.next_state, batch.done
         batch_state = torch.tensor(batch_state, dtype=torch.float).to(self.device)
         batch_action = torch.tensor(batch_action, dtype=torch.float).reshape(self.batch_size, -1).to(self.device)
-        batch_log_prob = torch.tensor(batch_log_prob, dtype=torch.float).to(self.device)
         batch_reward = torch.tensor(batch_reward, dtype=torch.float).reshape(self.batch_size, -1).to(self.device)
         batch_next_state = torch.tensor(batch_next_state, dtype=torch.float).to(self.device)
         batch_mask = torch.tensor([not i for i in batch_done], dtype=torch.bool).reshape(self.batch_size, -1).to(
@@ -169,24 +150,17 @@ class SAC:
         self.critic_opt.step()
 
         # update actor
-        # batch_pi, batch_pi_log_prob = self.actor.sample(batch_state)
-        # q1, q2 = self.critic(torch.cat([batch_state, batch_pi], dim=-1))
-        # batch_pi_log_prob = batch_pi_log_prob.sum(1, keepdim=True)
-        # policy_loss = (alpha * batch_pi_log_prob - torch.min(q1, q2)).mean()
-        # self.actor_opt.zero_grad()
-        # policy_loss.backward()
-        # self.actor_opt.step()
-
-        q1, q2 = self.critic(torch.cat([batch_state, batch_action], dim=-1))
-        batch_log_prob = batch_log_prob.sum(1, keepdim=True)
-        policy_loss = (alpha * batch_log_prob - torch.min(q1, q2)).mean()
+        batch_pi, batch_pi_log_prob = self.actor.sample(batch_state)
+        q1, q2 = self.critic(torch.cat([batch_state, batch_pi], dim=-1))
+        batch_pi_log_prob = batch_pi_log_prob.sum(1, keepdim=True)
+        policy_loss = (alpha * batch_pi_log_prob - torch.min(q1, q2)).mean()
         self.actor_opt.zero_grad()
         policy_loss.backward()
         self.actor_opt.step()
 
         # update alpha
         if self.auto_tune_alpha:
-            alpha_loss = - (self.log_alpha * (batch_log_prob + self.target_entropy).detach()).mean()
+            alpha_loss = - (self.log_alpha * (batch_pi_log_prob + self.target_entropy).detach()).mean()
             self.alpha_opt.zero_grad()
             alpha_loss.backward()
             self.alpha_opt.step()
@@ -194,7 +168,7 @@ class SAC:
             alpha_loss = torch.tensor(0)
 
         if (self.total_step+1) % self.update_frequency == 0:
-            update_model(self.target_critic, self.critic)
+            update_model(self.target_critic, self.critic, self.tau)
 
         return policy_loss.item(), critic_loss.item(), alpha_loss.item()
 
