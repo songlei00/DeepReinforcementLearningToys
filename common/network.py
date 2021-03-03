@@ -78,6 +78,42 @@ class GaussianActor(nn.Module):
         return log_prob
 
 
+class SACGaussianActor(GaussianActor):
+
+    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None):
+        GaussianActor.__init__(self, input_size, output_size, hidden_size, action_scale)
+
+    def forward(self, state):
+        x = F.relu(self.linear1(state))
+        x = F.relu(self.linear2(x))
+        mean = self.mean_linear(x)
+        log_std = self.log_std_linear(x)
+        log_std = log_std.clamp(-20, 2)
+        return mean, log_std
+
+    def sample(self, state, is_test=False):
+        mean, log_std = self.forward(state)
+        std = log_std.exp()
+        normal = Normal(mean, std)
+        if is_test:
+            action = torch.tanh(mean) * self.action_scale
+            y = torch.tanh(mean)
+            log_prob = normal.log_prob(mean) - torch.log(1 - y.pow(2) + 1e-8)
+        else:
+            # reparameterization trick
+            x = normal.rsample()
+            y = torch.tanh(x)
+            action = y * self.action_scale
+            # Enforcing action bound
+            # BUG: 应该对log_prob求和，输出的log_porb为向量
+            log_prob = normal.log_prob(x) - torch.log(1 - y.pow(2) + 1e-8)
+
+        return action, log_prob
+
+    def get_log_prob(self, state, action):
+        raise NotImplementedError("get_log_prob: not implemented")
+
+
 class DeterministicActor(nn.Module):
 
     def __init__(self, input_size, output_size, hidden_size=128, action_scale=None):
