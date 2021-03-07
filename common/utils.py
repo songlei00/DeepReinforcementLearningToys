@@ -15,7 +15,7 @@ class Memory:
                 'action',
                 'reward',
                 'next_state',
-                'done',
+                'done',  # 这里直接存储mask就可以。。。
             )
         )
         self.memory = deque(maxlen=maxlen)
@@ -29,6 +29,48 @@ class Memory:
 
     def __len__(self):
         return len(self.memory)
+
+
+class Trace:
+
+    def __init__(self, data_name='data_fmt', data=('state', 'action', 'log_prob', 'reward', 'next_state', 'mask', 'value')):
+        self.data_fmt = namedtuple(data_name, data)
+        self.trace = []
+
+    def push(self, *args):
+        self.trace.append(self.data_fmt(*args))
+
+    def cal_advantage(self, gamma, lam, is_normalize=True):
+        batch_size = len(self.trace)
+        total_reward = torch.Tensor(batch_size)
+        advantage = torch.Tensor(batch_size)
+        pre_total_reward = 0
+        pre_adv = 0
+        pre_value = 0
+
+        for idx in reversed(range(batch_size)):
+            data = self.data_fmt(*self.trace[idx])
+            delta = data.reward + gamma * pre_value - data.value
+            total_reward[idx] = data.reward + data.mask * gamma * pre_total_reward
+            advantage[idx] = delta + data.mask * gamma * lam * pre_adv
+
+            pre_total_reward = total_reward[idx]
+            pre_value = data.value
+            pre_adv = advantage[idx]
+
+        if is_normalize:
+            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-6)
+
+        return advantage, total_reward
+
+    def get(self):
+        return self.data_fmt(*zip(*self.trace))
+
+    def clear(self):
+        self.trace.clear()
+
+    def __len__(self):
+        return len(self.trace)
 
 
 class OUNoise:
@@ -82,7 +124,7 @@ class GaussianNoise:
     def __repr__(self):
         return 'GaussianNoise(mu={}, std={})'.format(self.mu, self.std)
 
-
+# openai: https://github.com/openai/baselines/blob/master/baselines/common/running_mean_std.py
 # http://www.johndcook.com/blog/standard_deviation/
 class RunningStat:
 

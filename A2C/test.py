@@ -1,5 +1,5 @@
 import gym
-from a2c_algorithm import A2C
+from a2c_algorithm_step_update import A2C
 
 import sys
 sys.path.append('..')

@@ -5,8 +5,8 @@ import torch.nn.functional as F
 
 import sys
 sys.path.append('..')
-from common.network import GaussianActor, Actor, Critic
-from common.utils import save_model
+from common.network import Actor, GaussianActor, Critic
+from common.utils import save_model, ZFilter, Trace
 
 
 class A2C:
@@ -15,8 +15,12 @@ class A2C:
                  env_name,
                  env,
                  actor_lr=3e-4,
-                 critic_lr=3e-3,
+                 critic_lr=3e-4,
+                 sample_size=2048,
+                 batch_size=1024,
+                 train_iters=2,
                  gamma=0.99,
+                 lam=0.95,
                  is_continue_action_space=False,
                  reward_shapeing_func=lambda x: x[1],
                  is_test=False,
@@ -26,17 +30,24 @@ class A2C:
         self.env = env
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
+        self.sample_size = sample_size
+        self.batch_size = batch_size
+        self.train_iters = train_iters
         self.gamma = gamma
+        self.lam = lam
         self.reward_shapeing_func = reward_shapeing_func
         self.save_model_frequency = save_model_frequency
         self.eval_frequency = eval_frequency
 
+        self.total_step = 0
+        self.state_normalize = ZFilter(env.observation_space.shape[0])
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print('Train on device:', self.device)
         if not is_test:
-            self.writer = SummaryWriter('./logs/A2C_{}'.format(self.env_name))
-        self.loss_fn = F.mse_loss
+            self.writer = SummaryWriter('./logs_epoch_update/A2C_{}'.format(self.env_name))
+        self.loss_fn = F.smooth_l1_loss
 
+        self.trace = Trace()
         if is_continue_action_space:
             self.actor = GaussianActor(env.observation_space.shape[0], env.action_space.shape[0],
                                        action_scale=int(env.action_space.high[0])).to(self.device)
@@ -49,30 +60,40 @@ class A2C:
         print(self.critic)
 
     def select_action(self, state, is_test=False):
-        state = torch.tensor(state, dtype=torch.float).to(self.device)
+        state = torch.tensor(state, dtype=torch.float).unsqueeze(0).to(self.device)
         a, log_prob = self.actor.sample(state, is_test)
-        return a.cpu().detach().numpy(), log_prob
+        return a, log_prob
 
     def train(self, epochs):
         best_eval = -1e6
         for epoch in range(epochs):
+            num_sample = 0
+            self.trace.clear()
             s = self.env.reset()
-            while True:
-                self.env.render()
+            s = self.state_normalize(s)
+            while num_sample < self.sample_size:
+                # self.env.render()
                 a, log_prob = self.select_action(s)
-                s_, r, done, _ = self.env.step(a)
-                r = self.reward_shapeing_func((s_, r, done, _))
-                policy_loss, critic_loss = self.learn(s, a, log_prob, r, s_, done)
+                torch_s = torch.tensor(s, dtype=torch.float).unsqueeze(0).to(self.device)
+                v = self.critic(torch_s)
+                s_, r, done, _ = self.env.step(a.cpu().detach().numpy()[0])
+                s_ = self.state_normalize(s_)
+                self.trace.push(s, a, log_prob, r, s_, not done, v)  # 这里怎么写才能在learn里面不用reshape呢
+                num_sample += 1
+                self.total_step += 1
                 s = s_
                 if done:
-                    break
+                    s = self.env.reset()
+                    s = self.state_normalize(s)
+
+            policy_loss, critic_loss = self.learn()
 
             self.writer.add_scalar('loss/actor_loss', policy_loss, epoch)
             self.writer.add_scalar('loss/critic_loss', critic_loss, epoch)
 
             if (epoch + 1) % self.save_model_frequency == 0:
-                save_model(self.critic, 'model/{}_model/critic_{}'.format(self.env_name, epoch))
-                save_model(self.actor, 'model/{}_model/actor_{}'.format(self.env_name, epoch))
+                save_model(self.critic, 'model_epoch_update/{}_model/critic_{}'.format(self.env_name, epoch))
+                save_model(self.actor, 'model_epoch_update/{}_model/actor_{}'.format(self.env_name, epoch))
 
             if (epoch + 1) % self.eval_frequency == 0:
                 eval_r = self.evaluate()
@@ -80,43 +101,44 @@ class A2C:
                 self.writer.add_scalar('reward', eval_r, epoch)
                 if eval_r > best_eval:
                     best_eval = eval_r
-                    save_model(self.critic, 'model/{}_model/best_critic'.format(self.env_name))
-                    save_model(self.actor, 'model/{}_model/best_actor'.format(self.env_name))
+                    save_model(self.critic, 'model_epoch_update/{}_model/best_critic'.format(self.env_name))
+                    save_model(self.actor, 'model_epoch_update/{}_model/best_actor'.format(self.env_name))
 
-    def learn(self, s, a, log_prob, r, s_, done):
-        mask = not done
-        next_q = self.critic(torch.tensor(s_, dtype=torch.float).to(self.device))
-        target_q = r + mask * self.gamma * next_q
-        pred_v = self.critic(torch.tensor(s, dtype=torch.float).to(self.device))
-        critic_loss = self.loss_fn(pred_v, target_q.detach())
+    def learn(self):
+        all_data = self.trace.get()
+        all_state = torch.tensor(all_data.state, dtype=torch.float).to(self.device)
+        all_log_prob = torch.cat(all_data.log_prob).to(self.device)
 
+        adv, total_reward = self.trace.cal_advantage(self.gamma, self.lam)
+        adv = adv.reshape(len(self.trace), -1).to(self.device)
+        total_reward = total_reward.reshape(len(self.trace), -1).to(self.device)
+
+        all_value = self.critic(all_state)
+        critic_loss = self.loss_fn(all_value, total_reward.detach())
         self.critic_opt.zero_grad()
         critic_loss.backward()
-        # for p in filter(lambda p: p.grad is not None, self.critic.parameters()):
-        #     p.grad.data.clamp_(min=-1, max=1)
         self.critic_opt.step()
 
-        advantage = (target_q - pred_v).detach()
-        policy_loss = -advantage * log_prob + 0.01 * log_prob.exp() * log_prob
+        policy_loss = (- all_log_prob * adv.detach() + all_log_prob.exp() * all_log_prob).mean()
 
         self.actor_opt.zero_grad()
         policy_loss.backward()
-        # for p in filter(lambda p: p.grad is not None, self.actor.parameters()):
-        #     p.grad.data.clamp_(min=-1, max=1)
         self.actor_opt.step()
-        # print(policy_loss, critic_loss, policy_loss.item(), critic_loss.item())
+
         return policy_loss.item(), critic_loss.item()
 
     def evaluate(self, epochs=3, is_render=False):
         eval_r = 0
         for _ in range(epochs):
             s = self.env.reset()
+            s = self.state_normalize(s, update=False)
             while True:
                 if is_render:
                     self.env.render()
                 with torch.no_grad():
                     a, _ = self.select_action(s, is_test=True)
-                s_, r, done, _ = self.env.step(a)
+                s_, r, done, _ = self.env.step(a.cpu().detach().numpy()[0])
+                s_ = self.state_normalize(s_, update=False)
                 s = s_
                 eval_r += r
                 if done:

@@ -5,18 +5,15 @@ import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
 
 
-def weights_init_(m):
-    if isinstance(m, nn.Conv2d):
-        nn.init.xavier_normal_(m.weight.data)
-        nn.init.constant_(m.bias.data, 0.1)
-    elif isinstance(m, nn.Linear):
+def xavier_weights_init_(m):
+    if isinstance(m, (nn.Conv2d, nn.Linear)):
         nn.init.xavier_normal_(m.weight.data)
         nn.init.constant_(m.bias.data, 0.1)
 
 
 class Actor(nn.Module):
 
-    def __init__(self, input_size, output_size, hidden_size=128):
+    def __init__(self, input_size, output_size, hidden_size=128, weights_init_=xavier_weights_init_):
         super(Actor, self).__init__()
         self.net = Sequential(
             Linear(input_size, hidden_size),
@@ -39,7 +36,7 @@ class Actor(nn.Module):
 
 class GaussianActor(nn.Module):
 
-    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None):
+    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None, weights_init_=xavier_weights_init_):
         super(GaussianActor, self).__init__()
         self.linear1 = Linear(input_size, hidden_size)
         self.linear2 = Linear(hidden_size, hidden_size)
@@ -61,12 +58,8 @@ class GaussianActor(nn.Module):
         mean, log_std = self.forward(state)
         std = log_std.exp()
         normal = Normal(mean, std)
-        if is_test:
-            action = mean
-            log_prob = normal.log_prob(action)
-        else:
-            action = normal.sample()
-            log_prob = normal.log_prob(action)
+        action = mean if is_test else normal.sample()
+        log_prob = normal.log_prob(action)
         action = action.clamp(-self.action_scale, self.action_scale)
 
         return action, log_prob
@@ -78,9 +71,53 @@ class GaussianActor(nn.Module):
         return log_prob
 
 
+class PPOGaussianActor:
+
+    pass
+
+
+# class GaussianActor(nn.Module):
+#
+#     def __init__(self, input_size, output_size, hidden_size=128, action_scale=None, weights_init_=xavier_weights_init_):
+#         super(GaussianActor, self).__init__()
+#         self.linear1 = Linear(input_size, hidden_size)
+#         self.linear2 = Linear(hidden_size, hidden_size)
+#         self.mean_linear = Linear(hidden_size, output_size)
+#         self.log_std = nn.Parameter(torch.zeros((1, output_size)) - 0.5, requires_grad=True)
+#
+#         self.apply(weights_init_)
+#         self.action_scale = 1 if action_scale is None else action_scale
+#
+#     def forward(self, state):
+#         x = F.relu(self.linear1(state))
+#         x = F.relu(self.linear2(x))
+#         mean = torch.tanh(self.mean_linear(x)) * self.action_scale
+#         # log_std = self.log_std.clamp(-20, 2)
+#         return mean, self.log_std
+#
+#     def sample(self, state, is_test=False):
+#         mean, log_std = self.forward(state)
+#         std = log_std.exp()
+#         normal = Normal(mean, std)
+#         if is_test:
+#             action = mean
+#         else:
+#             action = normal.rsample()
+#         log_prob = normal.log_prob(action)
+#         action = action.clamp(-self.action_scale, self.action_scale)
+#
+#         return action, log_prob
+#
+#     def get_log_prob(self, state, action):
+#         mean, log_std = self.forward(state)
+#         normal = Normal(mean, log_std.exp())
+#         log_prob = normal.log_prob(action)
+#         return log_prob
+
+
 class SACGaussianActor(GaussianActor):
 
-    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None):
+    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None, weights_init_=xavier_weights_init_):
         GaussianActor.__init__(self, input_size, output_size, hidden_size, action_scale)
 
     def forward(self, state):
@@ -116,7 +153,7 @@ class SACGaussianActor(GaussianActor):
 
 class DeterministicActor(nn.Module):
 
-    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None):
+    def __init__(self, input_size, output_size, hidden_size=128, action_scale=None, weights_init_=xavier_weights_init_):
         super(DeterministicActor, self).__init__()
         self.net = Sequential(
             Linear(input_size, hidden_size),
@@ -139,7 +176,7 @@ class DeterministicActor(nn.Module):
 
 class Critic(nn.Module):
 
-    def __init__(self, input_size, hidden_size=128):
+    def __init__(self, input_size, hidden_size=128, weights_init_=xavier_weights_init_):
         super(Critic, self).__init__()
         self.net = Sequential(
             Linear(input_size, hidden_size),
@@ -156,7 +193,7 @@ class Critic(nn.Module):
 
 class TwinCritic(nn.Module):
 
-    def __init__(self, input_size, hidden_size=128):
+    def __init__(self, input_size, hidden_size=128, weights_init_=xavier_weights_init_):
         super(TwinCritic, self).__init__()
         self.net1 = Sequential(
             Linear(input_size, hidden_size),
