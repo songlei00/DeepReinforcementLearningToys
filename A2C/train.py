@@ -1,13 +1,21 @@
 import gym
 import math
-# from a2c_algorithm_step_update import A2C
 from a2c_algorithm_epoch_update import A2C
 
-# 'Pendulum-v0'
-env_name = 'Pendulum-v0'
+env_names = ['Pendulum-v0', 'HalfCheetah-v2']
+env_name = env_names[0]
 env = gym.make(env_name)
-a2c = A2C(env_name, env, is_continue_action_space=True)
-a2c.train(3000)
+a2c = A2C(env_name, env)
+a2c.train(10000)
+
+
+# from a2c_algorithm_step_update import A2C
+
+# env_names = ['Pendulum-v0', 'HalfCheetah-v2', 'Hopper-v2', 'Ant-v2']
+# env_name = env_names[1]
+# env = gym.make(env_name)
+# a2c = A2C(env_name, env, is_continue_action_space=True)
+# a2c.train(10000)
 
 
 # 'MountainCar-v0'

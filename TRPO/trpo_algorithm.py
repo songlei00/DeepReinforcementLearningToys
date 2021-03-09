@@ -3,64 +3,10 @@ from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
-import numpy as np
-from collections import namedtuple
 import sys
 sys.path.append('..')
 from common.network import GaussianActor, Critic
-from common.utils import update_model, save_model
-
-
-class Trace:
-
-    def __init__(self):
-        self.data_fmt = namedtuple(
-            'data_fmt',
-            (
-                'state',
-                'action',
-                'reward',
-                'next_state',
-                'done',
-                'value'
-            )
-        )
-        self.trace = []
-
-    def push(self, *args):
-        self.trace.append(self.data_fmt(*args))
-
-    def cal_advantage(self, gamma, lam, is_normalize=True):
-        advantage = np.zeros(len(self.trace))
-        total_reward = np.zeros(len(self.trace))
-        tmp_total_reward = 0
-        pre_v = 0
-        pre_delta = 0
-
-        for idx in reversed(range(len(self.trace))):
-            s, a, r, s_, done, v = self.trace[idx]
-            # calculate accumulate reward
-            total_reward[idx] = r + gamma*(1-done)*tmp_total_reward
-            tmp_total_reward = total_reward[idx]
-            # calculate GAE
-            delta = r + gamma * v - pre_v
-            advantage[idx] = delta + gamma*lam*(1-done)*pre_delta
-            pre_v = v
-            pre_delta = advantage[idx]
-
-        if is_normalize:
-            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
-
-        return advantage, total_reward
-
-    def get(self):
-        return self.data_fmt(*zip(*self.trace))
-
-    def empty(self):
-        self.trace.clear()
-
-    def __len__(self):
-        return len(self.trace)
+from common.utils import Trace, update_model, save_model
 
 
 class TRPO:
@@ -121,7 +67,7 @@ class TRPO:
     def train(self, epochs):
         best_eval = - 1e6
         for epoch in range(epochs):
-            self.trace.empty()
+            self.trace.clear()
             num_sample = 0
             s = self.env.reset()
             # collect data

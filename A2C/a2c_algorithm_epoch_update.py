@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 import sys
 sys.path.append('..')
-from common.network import Actor, GaussianActor, Critic
+from common.network import GaussianActor, Critic
 from common.utils import save_model, ZFilter, Trace
 
 
@@ -17,12 +17,8 @@ class A2C:
                  actor_lr=3e-4,
                  critic_lr=3e-4,
                  sample_size=2048,
-                 batch_size=1024,
-                 train_iters=2,
                  gamma=0.99,
                  lam=0.95,
-                 is_continue_action_space=False,
-                 reward_shapeing_func=lambda x: x[1],
                  is_test=False,
                  save_model_frequency=200,
                  eval_frequency=10):
@@ -31,11 +27,8 @@ class A2C:
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
         self.sample_size = sample_size
-        self.batch_size = batch_size
-        self.train_iters = train_iters
         self.gamma = gamma
         self.lam = lam
-        self.reward_shapeing_func = reward_shapeing_func
         self.save_model_frequency = save_model_frequency
         self.eval_frequency = eval_frequency
 
@@ -48,11 +41,8 @@ class A2C:
         self.loss_fn = F.smooth_l1_loss
 
         self.trace = Trace()
-        if is_continue_action_space:
-            self.actor = GaussianActor(env.observation_space.shape[0], env.action_space.shape[0],
-                                       action_scale=int(env.action_space.high[0])).to(self.device)
-        else:
-            self.actor = Actor(env.observation_space.shape[0], env.action_space.n).to(self.device)
+        self.actor = GaussianActor(env.observation_space.shape[0], env.action_space.shape[0],
+                                   action_scale=int(env.action_space.high[0])).to(self.device)
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
         self.critic = Critic(env.observation_space.shape[0]).to(self.device)
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
@@ -72,7 +62,7 @@ class A2C:
             s = self.env.reset()
             s = self.state_normalize(s)
             while num_sample < self.sample_size:
-                # self.env.render()
+                self.env.render()
                 a, log_prob = self.select_action(s)
                 torch_s = torch.tensor(s, dtype=torch.float).unsqueeze(0).to(self.device)
                 v = self.critic(torch_s)
@@ -88,12 +78,12 @@ class A2C:
 
             policy_loss, critic_loss = self.learn()
 
-            self.writer.add_scalar('loss/actor_loss', policy_loss, epoch)
-            self.writer.add_scalar('loss/critic_loss', critic_loss, epoch)
+            self.writer.add_scalar('loss/actor_loss', policy_loss, self.total_step)
+            self.writer.add_scalar('loss/critic_loss', critic_loss, self.total_step)
 
             if (epoch + 1) % self.save_model_frequency == 0:
-                save_model(self.critic, 'model_epoch_update/{}_model/critic_{}'.format(self.env_name, epoch))
-                save_model(self.actor, 'model_epoch_update/{}_model/actor_{}'.format(self.env_name, epoch))
+                save_model(self.critic, 'model_epoch_update/{}_model/critic_{}'.format(self.env_name, self.total_step))
+                save_model(self.actor, 'model_epoch_update/{}_model/actor_{}'.format(self.env_name, self.total_step))
 
             if (epoch + 1) % self.eval_frequency == 0:
                 eval_r = self.evaluate()
@@ -119,7 +109,7 @@ class A2C:
         critic_loss.backward()
         self.critic_opt.step()
 
-        policy_loss = (- all_log_prob * adv.detach() + all_log_prob.exp() * all_log_prob).mean()
+        policy_loss = (- all_log_prob * adv.detach() + 0.01 * all_log_prob.exp() * all_log_prob).mean()
 
         self.actor_opt.zero_grad()
         policy_loss.backward()

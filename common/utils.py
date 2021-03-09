@@ -50,7 +50,7 @@ class Trace:
 
         for idx in reversed(range(batch_size)):
             data = self.data_fmt(*self.trace[idx])
-            delta = data.reward + gamma * pre_value - data.value
+            delta = data.reward + data.mask * gamma * pre_value - data.value
             total_reward[idx] = data.reward + data.mask * gamma * pre_total_reward
             advantage[idx] = delta + data.mask * gamma * lam * pre_adv
 

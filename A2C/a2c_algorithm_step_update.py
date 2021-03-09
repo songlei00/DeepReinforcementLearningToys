@@ -18,7 +18,7 @@ class A2C:
                  critic_lr=3e-3,
                  gamma=0.99,
                  is_continue_action_space=False,
-                 reward_shapeing_func=lambda x: x[1],
+                 reward_shaping_func=lambda x: x[1],
                  is_test=False,
                  save_model_frequency=200,
                  eval_frequency=10):
@@ -27,7 +27,7 @@ class A2C:
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
         self.gamma = gamma
-        self.reward_shapeing_func = reward_shapeing_func
+        self.reward_shaping_func = reward_shaping_func
         self.save_model_frequency = save_model_frequency
         self.eval_frequency = eval_frequency
 
@@ -61,7 +61,7 @@ class A2C:
                 self.env.render()
                 a, log_prob = self.select_action(s)
                 s_, r, done, _ = self.env.step(a)
-                r = self.reward_shapeing_func((s_, r, done, _))
+                r = self.reward_shaping_func((s_, r, done, _))
                 policy_loss, critic_loss = self.learn(s, a, log_prob, r, s_, done)
                 s = s_
                 if done:
