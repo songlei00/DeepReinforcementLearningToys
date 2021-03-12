@@ -7,7 +7,7 @@
 - [x] TD3
 - [x] SAC
 - [x] TRPO(bad)
-- [ ] PPO
+- [x] PPO(bad)
 - [ ] ACER
 - [ ] ACKTR
 

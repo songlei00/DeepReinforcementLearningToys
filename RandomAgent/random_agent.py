@@ -1,7 +1,7 @@
 import gym
 
 env_name = ['Hopper-v2', 'HalfCheetah-v2']
-env = gym.make(env_name[0])
+env = gym.make(env_name[1])
 
 for epoch in range(100):
     s = env.reset()
