@@ -7,7 +7,7 @@ from common.utils import load_model, ZFilter
 
 
 env_names = ['HalfCheetah-v2', 'Hopper-v2', 'Ant-v2']
-env_name = env_names[2]
+env_name = env_names[1]
 env = gym.make(env_name)
 sac = SAC(env_name, env, is_test=True)
 

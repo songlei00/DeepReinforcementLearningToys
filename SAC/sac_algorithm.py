@@ -15,10 +15,10 @@ class SAC:
                  env_name,
                  env,
                  actor_lr=3e-4,
-                 critic_lr=3e-3,
+                 critic_lr=3e-4,
                  alpha_lr=3e-4,
                  gamma=0.99,
-                 batch_size=32,
+                 batch_size=64,
                  replay_memory_size=1e6,
                  update_frequency=2,
                  warmup_step=1e3,
@@ -26,8 +26,8 @@ class SAC:
                  alpha=None,
                  is_test=False,
                  save_model_frequency=200,
-                 eval_frequency=20,
-                 save_log_frequency=20):
+                 eval_frequency=10,
+                 save_log_frequency=10):
         self.env_name = env_name
         self.env = env
         self.actor_lr = actor_lr
@@ -64,11 +64,11 @@ class SAC:
             self.log_alpha = torch.log(torch.tensor(alpha, dtype=torch.float)).to(self.device)
             print('Fixed alpha')
 
-        self.actor = SACGaussianActor(n_state, n_action, 128, action_scale=int(env.action_space.high[0])).to(self.device)
+        self.actor = SACGaussianActor(n_state, n_action, 256, action_scale=int(env.action_space.high[0])).to(self.device)
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
-        self.critic = TwinCritic(n_state + n_action).to(self.device)
+        self.critic = TwinCritic(n_state + n_action, 256).to(self.device)
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
-        self.target_critic = TwinCritic(n_state + n_action).to(self.device)
+        self.target_critic = TwinCritic(n_state + n_action, 256).to(self.device)
         update_model(self.target_critic, self.critic)
 
         print(self.actor)
@@ -90,6 +90,7 @@ class SAC:
                 self.env.render()
                 a, _ = self.select_action(s)
                 s_, r, done, _ = self.env.step(a)
+                s_ = self.state_normalize(s_)
                 self.memory.push(s, a, r, s_, done)
                 self.total_step += 1
                 if len(self.memory) > self.batch_size and self.total_step > self.warmup_step:
@@ -102,7 +103,7 @@ class SAC:
             if (epoch + 1) % self.save_log_frequency == 0:
                 self.writer.add_scalar('loss/critic_loss', critic_loss, self.total_step)
                 self.writer.add_scalar('loss/policy_loss', policy_loss, self.total_step)
-                self.writer.add_scalar('alpha', self.log_alpha.exp(), self.total_step)
+                self.writer.add_scalar('alpha', self.log_alpha.exp().item(), self.total_step)
                 self.writer.add_scalar('loss/alpha_loss', alpha_loss, self.total_step)
 
             if (epoch + 1) % self.save_model_frequency == 0:

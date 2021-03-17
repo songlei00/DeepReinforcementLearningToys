@@ -118,7 +118,7 @@ class PPOGaussianActor:
 class SACGaussianActor(GaussianActor):
 
     def __init__(self, input_size, output_size, hidden_size=128, action_scale=None, weights_init_=xavier_weights_init_):
-        GaussianActor.__init__(self, input_size, output_size, hidden_size, action_scale)
+        GaussianActor.__init__(self, input_size, output_size, hidden_size, action_scale, weights_init_)
 
     def forward(self, state):
         x = F.relu(self.linear1(state))
@@ -135,7 +135,7 @@ class SACGaussianActor(GaussianActor):
         if is_test:
             action = torch.tanh(mean) * self.action_scale
             y = torch.tanh(mean)
-            log_prob = normal.log_prob(mean) - torch.log(1 - y.pow(2) + 1e-8)
+            log_prob = normal.log_prob(mean) - torch.log(self.action_scale*(1 - y.pow(2)) + 1e-8)
         else:
             # reparameterization trick
             x = normal.rsample()
@@ -143,7 +143,7 @@ class SACGaussianActor(GaussianActor):
             action = y * self.action_scale
             # Enforcing action bound
             # BUG: 应该对log_prob求和，输出的log_porb为向量
-            log_prob = normal.log_prob(x) - torch.log(1 - y.pow(2) + 1e-8)
+            log_prob = normal.log_prob(x) - torch.log(self.action_scale*(1 - y.pow(2)) + 1e-8)
 
         return action, log_prob
 
